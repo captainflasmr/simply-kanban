@@ -153,6 +153,32 @@
                   (list :keyword "TODO" :title "x" :board "Project Alpha") 24)))
       (should-not (cl-some (lambda (l) (string-match-p "Project Alpha" l)) lines)))))
 
+(ert-deftest sk-test-collect-sprint ()
+  "`--collect-tasks' reads the heading's SPRINT property into `:sprint'."
+  (sk-test-with-org (concat "* TODO Alpha\n:PROPERTIES:\n:SPRINT: 3\n:END:\n"
+                            "* TODO Beta\n")
+    (let ((tasks (simply-kanban--collect-tasks src)))
+      (should (eql 3 (plist-get (car tasks) :sprint)))
+      (should (null (plist-get (cadr tasks) :sprint))))))
+
+(ert-deftest sk-test-sprint-inheritance ()
+  "A SPRINT on a parent heading is inherited by its cards."
+  (sk-test-with-org (concat "* Project Alpha\n:PROPERTIES:\n:SPRINT: 5\n:END:\n"
+                            "** TODO design\n")
+    (let ((tasks (simply-kanban--collect-tasks src)))
+      (should (eql 5 (plist-get (car tasks) :sprint))))))
+
+(ert-deftest sk-test-format-card-shows-sprint ()
+  "A card shows its sprint when no sprint filter is active, hidden otherwise."
+  (let ((simply-kanban--sprint-filter nil))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :sprint 2) 24)))
+      (should (cl-some (lambda (l) (string-match-p "Sprint: 2" l)) lines))))
+  (let ((simply-kanban--sprint-filter 2))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :sprint 2) 24)))
+      (should-not (cl-some (lambda (l) (string-match-p "Sprint: 2" l)) lines)))))
+
 ;;; Rendering / navigation
 
 (defmacro sk-test-with-board (content &rest body)
@@ -387,6 +413,8 @@ BODY runs with `board' current."
   (should (eq (lookup-key simply-kanban-mode-map "T") 'simply-kanban-clear-tag-filter))
   (should (eq (lookup-key simply-kanban-mode-map "F") 'simply-kanban-toggle-follow))
   (should (eq (lookup-key simply-kanban-mode-map ";") 'simply-kanban-set-effort))
+  (should (eq (lookup-key simply-kanban-mode-map "#") 'simply-kanban-set-sprint))
+  (should (eq (lookup-key simply-kanban-mode-map "S") 'simply-kanban-set-sprint-filter))
   (should (eq (lookup-key simply-kanban-mode-map "n") 'simply-kanban-next-card)))
 
 ;;; Dynamic column width
@@ -451,6 +479,64 @@ BODY runs with `board' current."
     (setq simply-kanban--tag-filter nil)
     (simply-kanban-refresh)
     (should (= 2 (length (simply-kanban--anchors))))))
+
+;;; Sprints
+
+(ert-deftest sk-test-sprint-filter ()
+  "A sprint filter shows only cards whose SPRINT property matches."
+  (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                              "* TODO Alpha\n:PROPERTIES:\n:SPRINT: 1\n:END:\n"
+                              "* TODO Beta\n:PROPERTIES:\n:SPRINT: 2\n:END:\n"
+                              "* TODO Gamma\n:PROPERTIES:\n:SPRINT: 1\n:END:\n")
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (should (= 3 (length (simply-kanban--anchors))))
+    (setq simply-kanban--sprint-filter 1)
+    (simply-kanban-refresh)
+    (should (= 2 (length (simply-kanban--anchors))))
+    (setq simply-kanban--sprint-filter nil)
+    (simply-kanban-refresh)
+    (should (= 3 (length (simply-kanban--anchors))))))
+
+(ert-deftest sk-test-set-sprint ()
+  "`simply-kanban-set-sprint' writes the SPRINT property back to Org."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "4")))
+      (simply-kanban-set-sprint))
+    (with-current-buffer src
+      (goto-char (point-min))
+      (re-search-forward "Alpha")
+      (org-back-to-heading t)
+      (should (string= (org-entry-get nil "SPRINT") "4")))))
+
+(ert-deftest sk-test-set-sprint-remove ()
+  "Empty input to `simply-kanban-set-sprint' removes the SPRINT property."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n:PROPERTIES:\n:SPRINT: 2\n:END:\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "")))
+      (simply-kanban-set-sprint))
+    (with-current-buffer src
+      (goto-char (point-min))
+      (re-search-forward "Alpha")
+      (org-back-to-heading t)
+      (should (null (org-entry-get nil "SPRINT"))))))
+
+(ert-deftest sk-test-default-sprint-on-open ()
+  "Opening a board honours `simply-kanban-default-sprint'."
+  (let ((simply-kanban-default-sprint 1))
+    (sk-test-with-org (concat "* TODO Alpha\n:PROPERTIES:\n:SPRINT: 1\n:END:\n"
+                              "* TODO Beta\n:PROPERTIES:\n:SPRINT: 2\n:END:\n")
+      (unwind-protect
+          (progn
+            (simply-kanban)
+            (with-current-buffer simply-kanban-buffer-name
+              (should (eql 1 simply-kanban--sprint-filter))
+              (should (= 1 (length (simply-kanban--anchors))))))
+        (when (get-buffer simply-kanban-buffer-name)
+          (kill-buffer simply-kanban-buffer-name))))))
 
 ;;; Delete card
 

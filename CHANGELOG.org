@@ -13,6 +13,7 @@ The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]
 
 ** Added
 
+- Sprints: a heading's ~SPRINT~ property (an integer, read with inheritance) assigns it to a sprint.  ~S~ filters the board to one sprint (the header-line shows ~[sprint: N]~), ~#~ sets/removes a card's ~SPRINT~, and ~simply-kanban-default-sprint~ (default ~nil~) chooses the sprint shown when a board opens.  While unfiltered each card shows a ~Sprint: N~ badge (toggle with ~simply-kanban-show-sprint~, face ~simply-kanban-sprint~); the badge is hidden once filtered to a single sprint.  No date arithmetic is involved — membership is purely the property value.
 - All-boards aggregate: in a multi-board file the chooser and ~B~ (~simply-kanban-switch-board~) now offer an "All Boards" entry that shows every board's cards in one view, with each card denoting its board (~▸ Project Alpha~).  Controlled by ~simply-kanban-all-boards~ (default ~t~) and named by ~simply-kanban-all-boards-name~.
 - Effort estimates (Jira-style): a card shows its Org ~Effort~ property as an ~Effort: 2:00~ badge, and each column header sums its cards' efforts in brackets (~[2:00]~) for a per-stage workload total.  ~;~ sets the effort with Org's native ~org-set-effort~ prompt, then saves and refreshes.  Toggle the whole feature with ~simply-kanban-show-effort~ (default ~t~); the badge and total use the new ~simply-kanban-effort~ face.
 

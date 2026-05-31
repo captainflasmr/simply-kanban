@@ -47,9 +47,11 @@ A header-line shows the source and the key reminders.  Columns expand to fill th
 | =k=       | delete the heading (with confirmation)               |
 | =t=       | filter board by tag                                  |
 | =T=       | clear tag filter                                     |
+| =S=       | filter board by sprint (=SPRINT= property)           |
 | =:=       | set the Org tags on the card at point                |
 | =,=       | set the Org priority of the card at point            |
 | =;=       | set the Org effort estimate on the card at point     |
+| =#=       | set the sprint (=SPRINT= property) on the card        |
 | =e= / =E= | toggle the body of the card / every card             |
 | =F=       | toggle follow mode (show heading as you move)        |
 | =B=       | switch board (multi-board files only)                |
@@ -82,6 +84,29 @@ When a file holds more than one board the chooser (and =B=) also offers an *All 
 
 Status changes and deletions are written straight back to the source file and, by default, saved (see =simply-kanban-save-after-change=).
 
+* Sprints
+
+Sprints are a plain Org property, not a date range: tag a heading with a =SPRINT= property holding an integer, and the board can filter to that sprint.  There is no calendar arithmetic — a card is "in" sprint 3 purely because it carries =:SPRINT: 3=, so you can assign any heading to any sprint freely.
+
+#+begin_src org
+,* TODO Design the parser
+,:PROPERTIES:
+,:SPRINT: 3
+,:END:
+#+end_src
+
+- Press =#= on a card to set (or, with empty input, remove) its =SPRINT=, using a simple number prompt — written straight back to the Org heading.
+- Press =S= to display only one sprint; the prompt offers the sprint numbers present on the board and accepts any integer, and empty input clears the filter to show every sprint again.  The active sprint shows in the header-line as =[sprint: N]=.
+- When *no* sprint filter is active each card shows its own =Sprint: N= badge so you can see the spread; once you filter to a single sprint that badge is hidden (every visible card shares it).
+
+The =SPRINT= property is read with inheritance, so setting =:SPRINT:= on a board container (or any parent heading) applies to all the TODO headings beneath it unless a child overrides it — handy for assigning a whole board to a sprint at once.
+
+Set the sprint shown by default with =simply-kanban-default-sprint= (default =nil=, meaning show all sprints).  When it is an integer, every freshly opened board starts filtered to that sprint; you can still change the displayed sprint live with =S=.  For example, to make sprint 2 the default view:
+
+#+begin_src elisp
+(setq simply-kanban-default-sprint 2)
+#+end_src
+
 * Customisation
 
 - =simply-kanban-min-column-width= (default 24) — columns expand to fill the window but never go narrower than this.
@@ -90,13 +115,15 @@ Status changes and deletions are written straight back to the source file and, b
 - =simply-kanban-auto-refresh= (default =t=) — refresh the board automatically whenever its source Org buffer is saved.
 - =simply-kanban-sort-by-priority= (default =nil=) — when non-nil, sort cards within each column by priority (A > B > C > none).
 - =simply-kanban-show-effort= (default =t=) — show each card's Org =Effort= estimate (=Effort: 2:00=) and sum each column's efforts in brackets (=[2:00]=) in its header.
+- =simply-kanban-default-sprint= (default =nil=) — sprint number a board filters to when first opened; =nil= shows all sprints.  Change the displayed sprint live with =S=.
+- =simply-kanban-show-sprint= (default =t=) — show a card's =SPRINT= number (=Sprint: N=) while no sprint filter is active.
 - =simply-kanban-save-after-change= (default =t=) — save the source Org buffer after a status change or deletion.
 - =simply-kanban-pulse-on-goto= (default =t=) — briefly pulse the target heading line when revealing it (=RET= and follow mode).
 - =simply-kanban-toplevel-name= (default ="Top Level"=) — name of the flat board holding a multi-board file's loose level-1 TODO headings.
 - =simply-kanban-all-boards= (default =t=) — in a multi-board file, offer an aggregate board (in the chooser and =B=) showing every board's cards at once, each card denoting its board.
 - =simply-kanban-all-boards-name= (default ="All Boards"=) — name of that aggregate entry.
 
-Faces: =simply-kanban-current-card= (focused card), =simply-kanban-tag= (card tags), =simply-kanban-effort= (effort badge and column total), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
+Faces: =simply-kanban-current-card= (focused card), =simply-kanban-tag= (card tags), =simply-kanban-effort= (effort badge and column total), =simply-kanban-sprint= (sprint badge), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
 
 * Kanban Feature Comparison Matrix
 
@@ -114,6 +141,7 @@ A cross-cutting view of how Simply Kanban sits among the other kanban options fo
 | Tag filtering                   | No         | No        | No         | Yes           |
 | Priority cookies shown          | No         | No        | Partial    | Yes           |
 | Effort estimate + column total  | No         | No        | No         | Yes           |
+| Sprint filter (property-based)   | No         | No        | Partial    | Yes           |
 | Inline card body / detail       | No         | No        | Yes        | Yes           |
 | Multiple boards per file        | Yes        | Yes       | Yes        | Yes           |
 | Agenda-wide aggregation         | No         | No        | No         | Yes           |

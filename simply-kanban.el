@@ -47,9 +47,11 @@
 ;;   k              delete the heading (with confirmation)
 ;;   t              filter board by tag
 ;;   T              clear tag filter
+;;   S              filter board by sprint (SPRINT property)
 ;;   :              set the Org tags on the card at point
 ;;   ,              set the Org priority of the card at point
 ;;   ;              set the Org effort estimate on the card at point
+;;   #              set the sprint (SPRINT property) on the card at point
 ;;   e              toggle the body of the card at point
 ;;   E              toggle the body of every card
 ;;   F              toggle follow mode
@@ -108,6 +110,23 @@ header then appends the summed effort of its cards in brackets."
   :type 'boolean
   :group 'simply-kanban)
 
+(defcustom simply-kanban-default-sprint nil
+  "Sprint number a board filters to when first opened, or nil for all sprints.
+A card's sprint is its `SPRINT' property (an integer, inherited from parent
+headings); set it from the board with \\[simply-kanban-set-sprint].  When this
+is an integer, opening a board shows only cards in that sprint; change the
+displayed sprint at any time with \\[simply-kanban-set-sprint-filter] (empty
+input clears the filter).  When nil, boards open showing every sprint."
+  :type '(choice (const :tag "All sprints" nil) integer)
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-show-sprint t
+  "When non-nil, show a card's SPRINT number on the board.
+The badge is shown only while no sprint filter is active: once filtered to a
+single sprint every visible card shares it, so the badge would be redundant."
+  :type 'boolean
+  :group 'simply-kanban)
+
 (defcustom simply-kanban-save-after-change t
   "When non-nil, save a source Org buffer after the board edits it.
 Edits include changing a card's status and deleting a heading."
@@ -159,6 +178,11 @@ height other than 1.0, which would break the board's monospace alignment."
   "Face for the effort estimate badge shown on a card and column total."
   :group 'simply-kanban)
 
+(defface simply-kanban-sprint
+  '((t :inherit org-special-keyword))
+  "Face for the sprint badge shown on a card."
+  :group 'simply-kanban)
+
 (defcustom simply-kanban-pulse-on-goto t
   "When non-nil, briefly pulse the Org heading when revealing it from the board.
 Applies both to \\[simply-kanban-goto] and to follow mode."
@@ -204,6 +228,11 @@ new files.")
 (defvar-local simply-kanban--tag-filter nil
   "When non-nil, only show cards carrying this tag.")
 
+(defvar-local simply-kanban--sprint-filter nil
+  "When non-nil (an integer), only show cards in that sprint.
+A card's sprint is its `SPRINT' property.  Initialised from
+`simply-kanban-default-sprint' when a board is opened.")
+
 (defvar-local simply-kanban--expanded-cards nil
   "Markers of cards whose Org body is currently shown on the board.")
 
@@ -238,10 +267,20 @@ text belonging to child headings is not included."
           (let ((body (string-trim (buffer-substring-no-properties beg end))))
             (unless (string-empty-p body) body)))))))
 
+(defun simply-kanban--read-sprint ()
+  "Return the SPRINT property of the Org entry at point as an integer, or nil.
+The property is read with inheritance, so a SPRINT set on a parent (e.g. a
+board container) applies to its cards.  Non-numeric values yield nil."
+  (let ((s (org-entry-get nil "SPRINT" t)))
+    (when (and s (string-match-p "\\`[ \t]*[0-9]+[ \t]*\\'" s))
+      (string-to-number s))))
+
 (defun simply-kanban--collect-tasks (buffer &optional restrict)
   "Collect TODO entries from Org BUFFER as a list of card plists.
-Each plist has :keyword :title :body :priority :tags :effort :file :board
-:marker.  :board is filled in only by `simply-kanban--collect-boards'.
+Each plist has :keyword :title :body :priority :tags :effort :sprint :file
+:board :marker.  :sprint is the heading's `SPRINT' property as an integer (nil
+when unset or non-numeric), inherited from parent headings.  :board is filled
+in only by `simply-kanban--collect-boards'.
 RESTRICT limits which entries become cards:
   nil          -- every TODO heading in the buffer;
   a marker     -- only TODO headings in that heading's subtree;
@@ -266,6 +305,7 @@ RESTRICT limits which entries become cards:
                                   :priority (nth 3 comps)
                                   :tags (org-get-tags nil t)
                                   :effort (org-entry-get nil "Effort")
+                                  :sprint (simply-kanban--read-sprint)
                                   :file file
                                   :board nil
                                   :marker (point-marker))
@@ -465,10 +505,10 @@ Returns nil when EFFORT is empty or cannot be parsed."
 (defun simply-kanban--format-card (task width)
   "Return compact card lines for TASK fitting WIDTH.
 A card shows its title prefixed by a priority cookie when one is set, then
-its tags (when any), its effort estimate, and -- in an aggregated board --
-its board (when showing all boards in a file) or source file.  When the card
-is expanded (see `simply-kanban--expanded-cards') the Org body follows below
-a divider."
+its tags (when any), its sprint (when no sprint filter is active), its effort
+estimate, and -- in an aggregated board -- its board (when showing all boards
+in a file) or source file.  When the card is expanded (see
+`simply-kanban--expanded-cards') the Org body follows below a divider."
   (let* ((inner (max 1 (- width 4)))
          (keyword (plist-get task :keyword))
          (border-face (simply-kanban--keyword-face keyword))
@@ -484,6 +524,12 @@ a divider."
                         (propertize (concat ":" (mapconcat #'identity tags ":") ":")
                                     'face 'simply-kanban-tag)
                         inner)))
+         (sprint (and simply-kanban-show-sprint
+                      (not simply-kanban--sprint-filter)
+                      (plist-get task :sprint)))
+         (sprint-line (when sprint
+                        (propertize (format "Sprint: %d" sprint)
+                                    'face 'simply-kanban-sprint)))
          (effort (and simply-kanban-show-effort (plist-get task :effort)))
          (effort-line (when (and effort (not (string-empty-p effort)))
                         (propertize (concat "Effort: " effort)
@@ -512,6 +558,8 @@ a divider."
       (push (funcall box tl) lines))
     (dolist (tline tags-lines)
       (push (funcall box tline) lines))
+    (when sprint-line
+      (push (funcall box sprint-line) lines))
     (when effort-line
       (push (funcall box effort-line) lines))
     (when board-line
@@ -616,6 +664,11 @@ Must be called with the board buffer current and its window selected."
          (tasks (if simply-kanban--tag-filter
                     (cl-remove-if-not
                      (lambda (tk) (member simply-kanban--tag-filter (plist-get tk :tags)))
+                     tasks)
+                  tasks))
+         (tasks (if simply-kanban--sprint-filter
+                    (cl-remove-if-not
+                     (lambda (tk) (eql simply-kanban--sprint-filter (plist-get tk :sprint)))
                      tasks)
                   tasks))
          (keywords (simply-kanban--merge-keywords buffers))
@@ -931,6 +984,59 @@ Candidates are the keywords of the card's own Org file."
   (simply-kanban-refresh)
   (message "Cleared tag filter"))
 
+(defun simply-kanban-set-sprint ()
+  "Set the SPRINT property of the card at point to a chosen integer.
+Empty input removes the property, taking the card out of every sprint."
+  (interactive)
+  (let ((marker (simply-kanban--marker-at-point)))
+    (if (not (and marker (buffer-live-p (marker-buffer marker))))
+        (message "Point is not on a card")
+      (let ((input (string-trim (read-string "Sprint number (empty = remove): "))))
+        (unless (or (string-empty-p input) (string-match-p "\\`[0-9]+\\'" input))
+          (user-error "Sprint must be a whole number"))
+        (with-current-buffer (marker-buffer marker)
+          (org-with-wide-buffer
+           (goto-char marker)
+           (org-back-to-heading t)
+           (if (string-empty-p input)
+               (org-delete-property "SPRINT")
+             (org-set-property "SPRINT" input))))
+        (simply-kanban--maybe-save (marker-buffer marker))
+        (simply-kanban-refresh)
+        (simply-kanban--goto-marker marker)
+        (message (if (string-empty-p input) "Sprint cleared" "Sprint %s") input)))))
+
+(defun simply-kanban-set-sprint-filter ()
+  "Display only cards in a chosen sprint (their SPRINT property).
+Offers the sprint numbers present on the board for completion; empty input
+clears the filter and shows every sprint."
+  (interactive)
+  (let* ((buffers (simply-kanban--spec-buffers simply-kanban--source-spec))
+         (tasks (simply-kanban--collect-all buffers))
+         (sprints (sort (delete-dups
+                         (delq nil (mapcar (lambda (tk) (plist-get tk :sprint)) tasks)))
+                        #'<))
+         (input (string-trim
+                 (completing-read "Show sprint (empty = all): "
+                                  (mapcar #'number-to-string sprints) nil nil))))
+    (cond
+     ((string-empty-p input)
+      (setq simply-kanban--sprint-filter nil))
+     ((string-match-p "\\`[0-9]+\\'" input)
+      (setq simply-kanban--sprint-filter (string-to-number input)))
+     (t (user-error "Sprint must be a whole number")))
+    (simply-kanban-refresh)
+    (if simply-kanban--sprint-filter
+        (message "Sprint filter: %d" simply-kanban--sprint-filter)
+      (message "Cleared sprint filter"))))
+
+(defun simply-kanban-clear-sprint-filter ()
+  "Clear the active sprint filter, showing every sprint."
+  (interactive)
+  (setq simply-kanban--sprint-filter nil)
+  (simply-kanban-refresh)
+  (message "Cleared sprint filter"))
+
 (defun simply-kanban-delete ()
   "Delete the Org heading for the card at point."
   (interactive)
@@ -1113,9 +1219,11 @@ that share the same `simply-kanban-marker' text property."
     (define-key map (kbd "k") #'simply-kanban-delete)
     (define-key map (kbd "t") #'simply-kanban-set-tag-filter)
     (define-key map (kbd "T") #'simply-kanban-clear-tag-filter)
+    (define-key map (kbd "S") #'simply-kanban-set-sprint-filter)
     (define-key map (kbd ":") #'simply-kanban-set-tags)
     (define-key map (kbd ",") #'simply-kanban-set-priority)
     (define-key map (kbd ";") #'simply-kanban-set-effort)
+    (define-key map (kbd "#") #'simply-kanban-set-sprint)
     (define-key map (kbd "F") #'simply-kanban-toggle-follow)
     (define-key map (kbd "e") #'simply-kanban-toggle-expand)
     (define-key map (kbd "E") #'simply-kanban-toggle-expand-all)
@@ -1161,6 +1269,10 @@ Uses the plain header-line foreground so it reads well on any theme."
           (:eval (if simply-kanban--tag-filter
                      (propertize (format " [tag: %s]" simply-kanban--tag-filter) 'face 'success)
                    ""))
+          (:eval (if simply-kanban--sprint-filter
+                     (propertize (format " [sprint: %d]" simply-kanban--sprint-filter)
+                                 'face 'warning)
+                   ""))
           "   "
           (:eval (propertize "F" 'face 'help-key-binding)) " follow"
           (:eval (if simply-kanban--follow "[ON]" ""))
@@ -1171,7 +1283,9 @@ Uses the plain header-line foreground so it reads well on any theme."
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
           (:eval (propertize ":" 'face 'help-key-binding)) " tags  "
           (:eval (propertize ";" 'face 'help-key-binding)) " effort  "
+          (:eval (propertize "#" 'face 'help-key-binding)) " sprint  "
           (:eval (propertize "t" 'face 'help-key-binding)) " tag  "
+          (:eval (propertize "S" 'face 'help-key-binding)) " sprint-filter  "
           (:eval (propertize "q" 'face 'help-key-binding)) " quit"))
   (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t))
 
@@ -1179,10 +1293,13 @@ Uses the plain header-line foreground so it reads well on any theme."
 
 (defun simply-kanban--transient-description ()
   "Header string for the `simply-kanban' transient menu."
-  (format "Simply Kanban   source: %s%s"
+  (format "Simply Kanban   source: %s%s%s"
           (simply-kanban--header-source)
           (if simply-kanban--tag-filter
               (format "   tag: %s" simply-kanban--tag-filter)
+            "")
+          (if simply-kanban--sprint-filter
+              (format "   sprint: %d" simply-kanban--sprint-filter)
             "")))
 
 ;;;###autoload (autoload 'simply-kanban-transient "simply-kanban" nil t)
@@ -1201,6 +1318,7 @@ Uses the plain header-line foreground so it reads well on any theme."
     ("," "set priority"    simply-kanban-set-priority)
     (":" "set tags"        simply-kanban-set-tags)
     (";" "set effort"      simply-kanban-set-effort)
+    ("#" "set sprint"      simply-kanban-set-sprint)
     ("k" "delete card"     simply-kanban-delete)]
    ["Reveal"
     ("RET" "reveal heading" simply-kanban-goto)
@@ -1209,11 +1327,13 @@ Uses the plain header-line foreground so it reads well on any theme."
     ("E" "expand all"       simply-kanban-toggle-expand-all :transient t)
     ("F" "follow mode"      simply-kanban-toggle-follow :transient t)]]
   [["Board"
-    ("t" "filter by tag"  simply-kanban-set-tag-filter)
-    ("T" "clear filter"   simply-kanban-clear-tag-filter :transient t)
-    ("B" "switch board"   simply-kanban-switch-board)
-    ("g" "refresh"        simply-kanban-refresh :transient t)
-    ("q" "quit board"     quit-window)]])
+    ("t" "filter by tag"    simply-kanban-set-tag-filter)
+    ("T" "clear tag filter" simply-kanban-clear-tag-filter :transient t)
+    ("S" "filter by sprint" simply-kanban-set-sprint-filter)
+    ("C" "clear sprint"     simply-kanban-clear-sprint-filter :transient t)
+    ("B" "switch board"     simply-kanban-switch-board)
+    ("g" "refresh"          simply-kanban-refresh :transient t)
+    ("q" "quit board"       quit-window)]])
 
 (defun simply-kanban--open (spec)
   "Build and display a kanban board for SPEC.
@@ -1221,7 +1341,8 @@ The buffer is displayed before rendering so columns size to the window."
   (let ((buffer (get-buffer-create simply-kanban-buffer-name)))
     (with-current-buffer buffer
       (unless (derived-mode-p 'simply-kanban-mode)
-        (simply-kanban-mode)))
+        (simply-kanban-mode))
+      (setq simply-kanban--sprint-filter simply-kanban-default-sprint))
     (pop-to-buffer buffer)
     (simply-kanban--render spec)))
 
