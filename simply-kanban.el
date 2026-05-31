@@ -40,6 +40,7 @@
 ;;   k              delete the heading (with confirmation)
 ;;   t              filter board by tag
 ;;   T              clear tag filter
+;;   :              set the Org tags on the card at point
 ;;   e              toggle the body of the card at point
 ;;   E              toggle the body of every card
 ;;   F              toggle follow mode
@@ -87,6 +88,12 @@ Columns otherwise expand to fill the board window, divided evenly."
   :type 'boolean
   :group 'simply-kanban)
 
+(defcustom simply-kanban-save-after-change t
+  "When non-nil, save a source Org buffer after the board edits it.
+Edits include changing a card's status and deleting a heading."
+  :type 'boolean
+  :group 'simply-kanban)
+
 (defface simply-kanban-column-header
   '((t :weight bold :inherit org-document-title))
   "Face for kanban column headers."
@@ -95,6 +102,13 @@ Columns otherwise expand to fill the board window, divided evenly."
 (defface simply-kanban-current-card
   '((t :weight bold))
   "Face used to highlight the card at point."
+  :group 'simply-kanban)
+
+(defface simply-kanban-tag
+  '((t :inherit shadow))
+  "Face for the tags shown on a card.
+Deliberately does not inherit `org-tag': that face is commonly scaled to a
+height other than 1.0, which would break the board's monospace alignment."
   :group 'simply-kanban)
 
 (defcustom simply-kanban-pulse-on-goto t
@@ -271,6 +285,10 @@ body is appended below the title."
                       "0"))
          (loc-str (format "%s:%s" file line-num))
          (title-lines (simply-kanban--wrap (plist-get task :title) inner))
+         (tags (plist-get task :tags))
+         (tags-str (when tags
+                     (propertize (concat ":" (mapconcat #'identity tags ":") ":")
+                                 'face 'simply-kanban-tag)))
          (body (and (simply-kanban--card-expanded-p marker)
                     (plist-get task :body)))
          (box (lambda (s)
@@ -291,6 +309,9 @@ body is appended below the title."
     (push (funcall rule "├" "┤") lines)
     (dolist (tl title-lines)
       (push (funcall box tl) lines))
+    (when tags-str
+      (dolist (tline (simply-kanban--wrap tags-str inner))
+        (push (funcall box tline) lines)))
     (when body
       (push (funcall rule "├" "┤") lines)
       (dolist (raw (split-string body "\n"))
@@ -548,6 +569,15 @@ pulsed; focus stays in the board."
             (recenter)
             (simply-kanban--flash-heading)))))))
 
+(defun simply-kanban--maybe-save (buffer)
+  "Save BUFFER if it visits a file and `simply-kanban-save-after-change' is set."
+  (when (and simply-kanban-save-after-change
+             (buffer-live-p buffer)
+             (buffer-file-name buffer)
+             (buffer-modified-p buffer))
+    (with-current-buffer buffer
+      (save-buffer))))
+
 (defun simply-kanban--set-state (marker keyword)
   "Set the TODO state of the heading at MARKER to KEYWORD.
 KEYWORD must be valid in the heading's own Org file."
@@ -555,7 +585,8 @@ KEYWORD must be valid in the heading's own Org file."
     (org-with-wide-buffer
      (goto-char marker)
      (org-back-to-heading t)
-     (org-todo keyword))))
+     (org-todo keyword))
+    (simply-kanban--maybe-save (current-buffer))))
 
 (defun simply-kanban--goto-marker (marker)
   "Move point to the card whose source position matches MARKER."
@@ -615,6 +646,21 @@ Candidates are the keywords of the card's own Org file."
           (simply-kanban--goto-marker marker)
           (message "%s" new))))))
 
+(defun simply-kanban-set-tags ()
+  "Set the Org tags on the card at point using Org's native tag prompt."
+  (interactive)
+  (let ((marker (simply-kanban--marker-at-point)))
+    (if (not (and marker (buffer-live-p (marker-buffer marker))))
+        (message "Point is not on a card")
+      (with-current-buffer (marker-buffer marker)
+        (org-with-wide-buffer
+         (goto-char marker)
+         (org-back-to-heading t)
+         (call-interactively #'org-set-tags-command)))
+      (simply-kanban--maybe-save (marker-buffer marker))
+      (simply-kanban-refresh)
+      (simply-kanban--goto-marker marker))))
+
 (defun simply-kanban-set-tag-filter ()
   "Filter the board to show only cards with a given tag."
   (interactive)
@@ -643,11 +689,13 @@ Candidates are the keywords of the card's own Org file."
     (if (not (and marker (marker-buffer marker)))
         (message "Point is not on a card")
       (when (y-or-n-p "Delete this heading? ")
-        (with-current-buffer (marker-buffer marker)
-          (org-with-wide-buffer
-           (goto-char marker)
-           (org-back-to-heading t)
-           (delete-region (point) (org-end-of-subtree t t))))
+        (let ((buf (marker-buffer marker)))
+          (with-current-buffer buf
+            (org-with-wide-buffer
+             (goto-char marker)
+             (org-back-to-heading t)
+             (delete-region (point) (org-end-of-subtree t t))))
+          (simply-kanban--maybe-save buf))
         (simply-kanban-refresh)
         (message "Deleted")))))
 
@@ -815,6 +863,7 @@ that share the same `simply-kanban-marker' text property."
     (define-key map (kbd "k") #'simply-kanban-delete)
     (define-key map (kbd "t") #'simply-kanban-set-tag-filter)
     (define-key map (kbd "T") #'simply-kanban-clear-tag-filter)
+    (define-key map (kbd ":") #'simply-kanban-set-tags)
     (define-key map (kbd "F") #'simply-kanban-toggle-follow)
     (define-key map (kbd "e") #'simply-kanban-toggle-expand)
     (define-key map (kbd "E") #'simply-kanban-toggle-expand-all)
@@ -850,7 +899,8 @@ that share the same `simply-kanban-marker' text property."
           (:eval (propertize "{/}" 'face 'help-key-binding)) " move  "
           (:eval (propertize "s" 'face 'help-key-binding)) " status  "
           (:eval (propertize "k" 'face 'help-key-binding)) " delete  "
-          (:eval (propertize "t/T" 'face 'help-key-binding)) " tag  "
+          (:eval (propertize "t/T" 'face 'help-key-binding)) " filter  "
+          (:eval (propertize ":" 'face 'help-key-binding)) " tags  "
           (:eval (propertize "n/p" 'face 'help-key-binding)) " card  "
           (:eval (propertize "TAB" 'face 'help-key-binding)) " column  "
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
