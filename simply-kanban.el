@@ -140,7 +140,9 @@ When set, cards show their source file so they can be told apart.")
   "Collect TODO entries from Org BUFFER as a list of card plists.
 Each plist has :keyword :title :priority :tags :file :marker."
   (with-current-buffer buffer
-    (let ((file (file-name-nondirectory (or (buffer-file-name) (buffer-name)))))
+    (let ((file (if (buffer-file-name)
+                    (file-name-nondirectory (buffer-file-name))
+                  (buffer-name))))
       (org-with-wide-buffer
        (let (tasks)
          (org-map-entries
@@ -202,24 +204,28 @@ buffer (or buffers sharing a workflow) the natural order is kept."
       (split-string (buffer-string) "\n"))))
 
 (defun simply-kanban--format-card (task width)
-  "Return a list of card lines for TASK fitting in WIDTH columns."
+  "Return card lines for TASK fitting WIDTH, with a metadata/content split."
   (let* ((inner (max 1 (- width 4)))
          (keyword (plist-get task :keyword))
          (border-face (simply-kanban--keyword-face keyword))
          (prio (plist-get task :priority))
-         (tags (plist-get task :tags))
-         (file (and simply-kanban--multi-source (plist-get task :file)))
+         (prio-str (pcase prio
+                     (?A "[HIGH]")
+                     (?B "[NORMAL]")
+                     (?C "[LOW]")
+                     (_ "[NORMAL]")))
+         (file (or (plist-get task :file) "org"))
+         (marker (plist-get task :marker))
+         (line-num (if (and marker (marker-position marker) (marker-buffer marker))
+                        (with-current-buffer (marker-buffer marker)
+                          (line-number-at-pos (marker-position marker)))
+                      "0"))
+         (loc-str (format "%s:%s" file line-num))
          (title-lines (simply-kanban--wrap (plist-get task :title) inner))
-         (meta (string-join
-                (delq nil
-                      (list (when prio (format "[#%c]" prio))
-                            (when tags (concat ":" (string-join tags ":") ":"))
-                            (when file (concat "» " file))))
-                " "))
          (box (lambda (s)
                 (concat (propertize "│" 'face border-face)
                         " "
-                        (simply-kanban--pad (truncate-string-to-width s inner) inner)
+                        (simply-kanban--pad s inner)
                         " "
                         (propertize "│" 'face border-face))))
          lines)
@@ -227,10 +233,15 @@ buffer (or buffers sharing a workflow) the natural order is kept."
                   (propertize (make-string (- width 2) ?─) 'face border-face)
                   (propertize "┐" 'face border-face))
           lines)
+    (push (funcall box prio-str) lines)
+    (push (funcall box loc-str) lines)
+    (push (funcall box "james dyer") lines)
+    (push (concat (propertize "├" 'face border-face)
+                  (propertize (make-string (- width 2) ?─) 'face border-face)
+                  (propertize "┤" 'face border-face))
+          lines)
     (dolist (tl title-lines)
       (push (funcall box tl) lines))
-    (unless (string-empty-p meta)
-      (push (funcall box meta) lines))
     (push (concat (propertize "└" 'face border-face)
                   (propertize (make-string (- width 2) ?─) 'face border-face)
                   (propertize "┘" 'face border-face))
@@ -259,10 +270,14 @@ Each returned string is exactly WIDTH columns wide."
                                    (simply-kanban--priority-order (plist-get b :priority)))))
                       col-tasks))
          (header-face (simply-kanban--keyword-face keyword))
-         (header (propertize (format " %s · %d" keyword (length col-tasks))
+         (header (propertize (format " %s (%d)" keyword (length col-tasks))
                              'face header-face
                              'simply-kanban-keyword keyword))
+         (divider (propertize (make-string width ?─)
+                              'face 'shadow
+                              'simply-kanban-keyword keyword))
          (cells (list (simply-kanban--pad header width)
+                      divider
                       (simply-kanban--pad "" width))))
     (dolist (task col-tasks)
       (let ((marker (plist-get task :marker))
@@ -686,7 +701,9 @@ that share the same `simply-kanban-marker' text property."
                              (point-max))))
                 (when (eq (get-text-property (point) 'simply-kanban-marker) card)
                   (let ((ov (make-overlay (point) end)))
-                    (overlay-put ov 'face 'simply-kanban-current-card)
+                    ;; Using a face list merges over any pre-existing text
+                    ;; faces without clearing their colors.
+                    (overlay-put ov 'face '(:weight bold :inherit simply-kanban-current-card))
                     (overlay-put ov 'priority 100)
                     (push ov simply-kanban--highlight-overlays)))
                 (goto-char end)))))))))
