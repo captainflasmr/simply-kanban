@@ -67,6 +67,11 @@
   :type 'string
   :group 'simply-kanban)
 
+(defcustom simply-kanban-auto-refresh t
+  "When non-nil, refresh the board whenever its source Org buffer is saved."
+  :type 'boolean
+  :group 'simply-kanban)
+
 (defface simply-kanban-column-header
   '((t :weight bold :inherit org-document-title))
   "Face for kanban column headers."
@@ -74,11 +79,21 @@
 
 ;;; Board state (buffer-local in the board buffer)
 
-(defvar-local simply-kanban--source-buffer nil
-  "The Org buffer this board was built from.")
+(defvar-local simply-kanban--source-spec nil
+  "Descriptor of where this board's tasks come from.
+Either (buffer . BUFFER) for a single Org buffer, or (files . FILES)
+for a list of Org files (e.g. the agenda files).  Re-resolved to live
+buffers on every render so the board can pick up new files.")
+
+(defvar-local simply-kanban--source-buffers nil
+  "The live Org buffers this board last aggregated, for hook management.")
 
 (defvar-local simply-kanban--keywords nil
   "Ordered list of TODO keywords forming the board's columns.")
+
+(defvar simply-kanban--multi-source nil
+  "Bound non-nil while rendering a board that spans more than one file.
+When set, cards show their source file so they can be told apart.")
 
 ;;; Data collection
 
@@ -90,22 +105,49 @@
 
 (defun simply-kanban--collect-tasks (buffer)
   "Collect TODO entries from Org BUFFER as a list of card plists.
-Each plist has :keyword :title :priority :tags :marker."
+Each plist has :keyword :title :priority :tags :file :marker."
   (with-current-buffer buffer
-    (org-with-wide-buffer
-     (let (tasks)
-       (org-map-entries
-        (lambda ()
-          (let ((kw (org-get-todo-state)))
-            (when kw
-              (let ((comps (org-heading-components)))
-                (push (list :keyword kw
-                            :title (or (org-get-heading t t t t) "")
-                            :priority (nth 3 comps)
-                            :tags (org-get-tags nil t)
-                            :marker (point-marker))
-                      tasks))))))
-       (nreverse tasks)))))
+    (let ((file (file-name-nondirectory (or (buffer-file-name) (buffer-name)))))
+      (org-with-wide-buffer
+       (let (tasks)
+         (org-map-entries
+          (lambda ()
+            (let ((kw (org-get-todo-state)))
+              (when kw
+                (let ((comps (org-heading-components)))
+                  (push (list :keyword kw
+                              :title (or (org-get-heading t t t t) "")
+                              :priority (nth 3 comps)
+                              :tags (org-get-tags nil t)
+                              :file file
+                              :marker (point-marker))
+                        tasks))))))
+         (nreverse tasks))))))
+
+(defun simply-kanban--spec-buffers (spec)
+  "Resolve SPEC to a list of live Org buffers."
+  (pcase spec
+    (`(buffer . ,buffer) (and (buffer-live-p buffer) (list buffer)))
+    (`(files . ,files)
+     (delq nil (mapcar (lambda (f)
+                         (when (and f (file-exists-p f))
+                           (find-file-noselect f)))
+                       files)))))
+
+(defun simply-kanban--collect-all (buffers)
+  "Collect tasks from every buffer in BUFFERS, concatenated."
+  (apply #'append (mapcar #'simply-kanban--collect-tasks buffers)))
+
+(defun simply-kanban--merge-keywords (buffers)
+  "Return the union of TODO keywords across BUFFERS, preserving order.
+Keywords are taken in the order they first appear, so for a single
+buffer (or buffers sharing a workflow) the natural order is kept."
+  (let (result)
+    (dolist (buffer buffers)
+      (dolist (kw (simply-kanban--source-keywords buffer))
+        (unless (member kw result)
+          (push kw result))))
+    (nreverse result)))
 
 ;;; Rendering
 
@@ -131,11 +173,13 @@ Each plist has :keyword :title :priority :tags :marker."
   (let* ((inner (max 1 (- width 4)))
          (prio (plist-get task :priority))
          (tags (plist-get task :tags))
+         (file (and simply-kanban--multi-source (plist-get task :file)))
          (title-lines (simply-kanban--wrap (plist-get task :title) inner))
          (meta (string-join
                 (delq nil
                       (list (when prio (format "[#%c]" prio))
-                            (when tags (concat ":" (string-join tags ":") ":"))))
+                            (when tags (concat ":" (string-join tags ":") ":"))
+                            (when file (concat "» " file))))
                 " "))
          (box (lambda (s)
                 (format "│ %s │"
@@ -174,26 +218,33 @@ Each returned string is exactly WIDTH columns wide."
       (push (simply-kanban--pad "" width) cells))
     (nreverse cells)))
 
-(defun simply-kanban--render (board-buffer source-buffer)
-  "Render the kanban board for SOURCE-BUFFER into BOARD-BUFFER."
+(defun simply-kanban--render (board-buffer spec)
+  "Render the kanban board described by SPEC into BOARD-BUFFER.
+SPEC is resolved to a list of Org buffers via `simply-kanban--spec-buffers'."
   (with-current-buffer board-buffer
     (let* ((inhibit-read-only t)
-           (tasks (simply-kanban--collect-tasks source-buffer))
-           (keywords (simply-kanban--source-keywords source-buffer))
+           (buffers (simply-kanban--spec-buffers spec))
+           (simply-kanban--multi-source (> (length buffers) 1))
+           (tasks (simply-kanban--collect-all buffers))
+           (keywords (simply-kanban--merge-keywords buffers))
            (width simply-kanban-column-width)
            (gap (make-string simply-kanban-column-gap ?\s))
            (columns (mapcar (lambda (kw) (simply-kanban--column-cells kw tasks width))
                             keywords))
            (nrows (apply #'max 0 (mapcar #'length columns))))
       (erase-buffer)
-      (setq simply-kanban--source-buffer source-buffer
+      (setq simply-kanban--source-spec spec
+            simply-kanban--source-buffers buffers
             simply-kanban--keywords keywords)
-      (dotimes (row nrows)
-        (let ((segments (mapcar (lambda (col)
-                                  (or (nth row col)
-                                      (simply-kanban--pad "" width)))
-                                columns)))
-          (insert (string-join segments gap) "\n")))
+      (if (null buffers)
+          (insert "No source Org buffers.\n")
+        (dotimes (row nrows)
+          (let ((segments (mapcar (lambda (col)
+                                    (or (nth row col)
+                                        (simply-kanban--pad "" width)))
+                                  columns)))
+            (insert (string-join segments gap) "\n"))))
+      (simply-kanban--install-hooks board-buffer buffers)
       (goto-char (point-min))
       (simply-kanban-next-card))))
 
@@ -285,7 +336,8 @@ Each returned string is exactly WIDTH columns wide."
             ((fboundp 'org-show-entry) (org-show-entry))))))
 
 (defun simply-kanban--set-state (marker keyword)
-  "Set the TODO state of the heading at MARKER to KEYWORD."
+  "Set the TODO state of the heading at MARKER to KEYWORD.
+KEYWORD must be valid in the heading's own Org file."
   (with-current-buffer (marker-buffer marker)
     (org-with-wide-buffer
      (goto-char marker)
@@ -304,17 +356,20 @@ Each returned string is exactly WIDTH columns wide."
     (when target (goto-char (car target)))))
 
 (defun simply-kanban--move (delta)
-  "Move the card at point DELTA stages along the workflow."
+  "Move the card at point DELTA stages along its file's workflow.
+Stages follow the card's own Org file keyword sequence, so a card never
+lands in a state its file does not define -- important when aggregating
+files that use different workflows."
   (let ((marker (simply-kanban--marker-at-point))
         (kw (simply-kanban--column-at-point)))
-    (if (not marker)
+    (if (not (and marker (buffer-live-p (marker-buffer marker))))
         (message "Point is not on a card")
-      (let* ((idx (cl-position kw simply-kanban--keywords :test #'equal))
+      (let* ((kws (simply-kanban--source-keywords (marker-buffer marker)))
+             (idx (cl-position kw kws :test #'equal))
              (new-idx (and idx (+ idx delta))))
-        (if (or (null new-idx) (< new-idx 0)
-                (>= new-idx (length simply-kanban--keywords)))
+        (if (or (null idx) (< new-idx 0) (>= new-idx (length kws)))
             (message "No further stage")
-          (let ((new-kw (nth new-idx simply-kanban--keywords)))
+          (let ((new-kw (nth new-idx kws)))
             (simply-kanban--set-state marker new-kw)
             (simply-kanban-refresh)
             (simply-kanban--goto-marker marker)
@@ -331,16 +386,51 @@ Each returned string is exactly WIDTH columns wide."
   (simply-kanban--move -1))
 
 (defun simply-kanban-refresh ()
-  "Rebuild the board from its source buffer."
+  "Rebuild the board, re-resolving its source spec."
   (interactive)
   (unless (derived-mode-p 'simply-kanban-mode)
     (user-error "Not in a kanban board"))
-  (let ((source simply-kanban--source-buffer)
+  (let ((spec simply-kanban--source-spec)
         (pt (point)))
-    (unless (buffer-live-p source)
-      (user-error "Source Org buffer is gone"))
-    (simply-kanban--render (current-buffer) source)
+    (unless spec
+      (user-error "This board has no source"))
+    (simply-kanban--render (current-buffer) spec)
     (goto-char (min pt (point-max)))))
+
+;;; Auto-refresh
+
+(defun simply-kanban--boards-for (source)
+  "Return the live board buffers that aggregate SOURCE."
+  (seq-filter (lambda (buf)
+                (memq source (buffer-local-value 'simply-kanban--source-buffers buf)))
+              (buffer-list)))
+
+(defun simply-kanban--after-source-save ()
+  "Refresh any board built from the just-saved Org buffer.
+Installed buffer-locally on each source buffer's `after-save-hook'."
+  (dolist (board (simply-kanban--boards-for (current-buffer)))
+    (with-current-buffer board
+      (simply-kanban-refresh))))
+
+(defun simply-kanban--on-board-kill ()
+  "Drop each source's refresh hook when this board was its last consumer.
+Installed buffer-locally on the board buffer's `kill-buffer-hook'."
+  (let ((this (current-buffer)))
+    (dolist (source simply-kanban--source-buffers)
+      (when (buffer-live-p source)
+        (unless (seq-some (lambda (buf) (not (eq buf this)))
+                          (simply-kanban--boards-for source))
+          (with-current-buffer source
+            (remove-hook 'after-save-hook #'simply-kanban--after-source-save t)))))))
+
+(defun simply-kanban--install-hooks (board sources)
+  "Wire up auto-refresh between BOARD and its SOURCES (a list of buffers)."
+  (with-current-buffer board
+    (add-hook 'kill-buffer-hook #'simply-kanban--on-board-kill nil t))
+  (when simply-kanban-auto-refresh
+    (dolist (source sources)
+      (with-current-buffer source
+        (add-hook 'after-save-hook #'simply-kanban--after-source-save nil t)))))
 
 ;;; Mode
 
@@ -370,6 +460,14 @@ Each returned string is exactly WIDTH columns wide."
   (setq-local cursor-type 'box)
   (hl-line-mode 1))
 
+(defun simply-kanban--open (spec)
+  "Build and display a kanban board for SPEC."
+  (let ((buffer (get-buffer-create simply-kanban-buffer-name)))
+    (with-current-buffer buffer
+      (simply-kanban-mode)
+      (simply-kanban--render buffer spec))
+    (pop-to-buffer buffer)))
+
 ;;;###autoload
 (defun simply-kanban ()
   "Open a kanban board for the current Org buffer.
@@ -378,12 +476,19 @@ carrying those keywords."
   (interactive)
   (unless (derived-mode-p 'org-mode)
     (user-error "Not in an Org buffer"))
-  (let ((source (current-buffer))
-        (buffer (get-buffer-create simply-kanban-buffer-name)))
-    (with-current-buffer buffer
-      (simply-kanban-mode)
-      (simply-kanban--render buffer source))
-    (pop-to-buffer buffer)))
+  (simply-kanban--open (cons 'buffer (current-buffer))))
+
+;;;###autoload
+(defun simply-kanban-agenda ()
+  "Open a kanban board aggregating every Org agenda file.
+Columns are the union of the agenda files' TODO keywords; each card
+shows which file it comes from.  Moving a card follows its own file's
+workflow and is written back to that file."
+  (interactive)
+  (let ((files (org-agenda-files)))
+    (unless files
+      (user-error "No agenda files (see `org-agenda-files')"))
+    (simply-kanban--open (cons 'files files))))
 
 (provide 'simply-kanban)
 ;;; simply-kanban.el ends here
