@@ -4,9 +4,10 @@
 
 ;; Loaded first by every Makefile target (and by CI).  Points
 ;; `package-user-dir' at a project-local .elpa so dependency installs
-;; (package-lint) never touch the developer's real package store, and puts
-;; the working copy at the front of `load-path'.  Org is built in, so the
-;; package itself has no external dependencies.
+;; (transient, package-lint) never touch the developer's real package store,
+;; and puts the working copy at the front of `load-path'.  Org is built in;
+;; `transient' is bundled on Emacs 28.1+ and otherwise installed into ./.elpa
+;; by `make deps'.
 
 ;;; Code:
 

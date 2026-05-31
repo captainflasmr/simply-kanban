@@ -4,7 +4,7 @@
 #   make compile    byte-compile (warnings are errors)
 #   make checkdoc   run checkdoc
 #   make lint       run package-lint (needs `make deps')
-#   make deps       install package-lint into ./.elpa
+#   make deps       install dependencies (transient, package-lint) into ./.elpa
 #   make all        compile + test + checkdoc
 #   make clean      remove byte-compiled files
 #
@@ -25,7 +25,8 @@ all: compile test checkdoc
 deps:
 	$(BATCH) \
 	  --eval "(unless package-archive-contents (package-refresh-contents))" \
-	  --eval "(unless (package-installed-p 'package-lint) (package-install 'package-lint))"
+	  --eval "(dolist (p '(transient package-lint)) \
+	            (unless (package-installed-p p) (package-install p)))"
 
 compile:
 	$(BATCH) \

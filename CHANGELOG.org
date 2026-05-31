@@ -21,6 +21,7 @@ The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]
 - Set priority from the board: ~,~ runs Org's native priority prompt on the card's heading, then saves and refreshes.
 - Heading pulse: revealing a heading (~RET~) and follow mode briefly pulse the target Org heading line.  Toggle with ~simply-kanban-pulse-on-goto~ (default ~t~); the pulse uses the new ~simply-kanban-flash~ face.
 - Save after change: ~simply-kanban-save-after-change~ (default ~t~) saves the source Org buffer after a status change or deletion.
+- Transient menu: press ~SPC~ on the board for a ~transient~ menu grouping every command (Navigate / Move-Edit / Reveal / Board), modelled on the menu in simply-annotate.  Adds a ~transient~ (0.4) dependency (bundled with Emacs 28.1+).
 
 ** Changed
 

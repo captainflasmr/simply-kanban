@@ -2,7 +2,7 @@
 
 ;; Author: James Dyer <captainflasmr@gmail.com>
 ;; Version: 0.4.0
-;; Package-Requires: ((emacs "27.2"))
+;; Package-Requires: ((emacs "27.2") (transient "0.4"))
 ;; Keywords: outlines, convenience, tools, org
 ;; URL: https://github.com/captainflasmr/simply-kanban
 
@@ -54,6 +54,7 @@
 ;;   F              toggle follow mode
 ;;   B              switch board (multi-board files only)
 ;;   g              refresh
+;;   SPC / ?        open the transient menu
 ;;   q              quit
 
 ;;; Code:
@@ -63,6 +64,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'pulse)
+(require 'transient)
 
 ;;; Customization
 
@@ -994,6 +996,8 @@ that share the same `simply-kanban-marker' text property."
     (define-key map (kbd "E") #'simply-kanban-toggle-expand-all)
     (define-key map (kbd "B") #'simply-kanban-switch-board)
     (define-key map (kbd "g") #'simply-kanban-refresh)
+    (define-key map (kbd "SPC") #'simply-kanban-transient)
+    (define-key map (kbd "?") #'simply-kanban-transient)
     (define-key map (kbd "q") #'quit-window)
     map)
   "Keymap for `simply-kanban-mode'.")
@@ -1029,6 +1033,7 @@ Uses the plain header-line foreground so it reads well on any theme."
                      (propertize (format " [tag: %s]" simply-kanban--tag-filter) 'face 'success)
                    ""))
           "   "
+          (:eval (propertize "SPC/?" 'face 'help-key-binding)) " menu  "
           (:eval (propertize "RET" 'face 'help-key-binding)) " goto  "
           (:eval (propertize "v" 'face 'help-key-binding)) " view  "
           (:eval (propertize "{/}" 'face 'help-key-binding)) " move  "
@@ -1051,6 +1056,45 @@ Uses the plain header-line foreground so it reads well on any theme."
           (:eval (propertize "g" 'face 'help-key-binding)) " refresh  "
           (:eval (propertize "q" 'face 'help-key-binding)) " quit"))
   (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t))
+
+;;; Transient menu
+
+(defun simply-kanban--transient-description ()
+  "Header string for the `simply-kanban' transient menu."
+  (format "Simply Kanban   source: %s%s"
+          (simply-kanban--header-source)
+          (if simply-kanban--tag-filter
+              (format "   tag: %s" simply-kanban--tag-filter)
+            "")))
+
+;;;###autoload (autoload 'simply-kanban-transient "simply-kanban" nil t)
+(transient-define-prefix simply-kanban-transient ()
+  "Transient menu for `simply-kanban'."
+  [:description simply-kanban--transient-description
+   ["Navigate"
+    ("n" "next card"       simply-kanban-next-card :transient t)
+    ("p" "previous card"   simply-kanban-prev-card :transient t)
+    ("f" "next column"     simply-kanban-next-column :transient t)
+    ("b" "previous column" simply-kanban-prev-column :transient t)]
+   ["Move / Edit"
+    ("}" "advance stage"   simply-kanban-advance :transient t)
+    ("{" "retreat stage"   simply-kanban-retreat :transient t)
+    ("s" "set status"      simply-kanban-set-status)
+    ("," "set priority"    simply-kanban-set-priority)
+    (":" "set tags"        simply-kanban-set-tags)
+    ("k" "delete card"     simply-kanban-delete)]
+   ["Reveal"
+    ("RET" "reveal heading" simply-kanban-goto)
+    ("v" "other window"     simply-kanban-jump-other-window)
+    ("e" "expand card"      simply-kanban-toggle-expand :transient t)
+    ("E" "expand all"       simply-kanban-toggle-expand-all :transient t)
+    ("F" "follow mode"      simply-kanban-toggle-follow :transient t)]]
+  [["Board"
+    ("t" "filter by tag"  simply-kanban-set-tag-filter)
+    ("T" "clear filter"   simply-kanban-clear-tag-filter :transient t)
+    ("B" "switch board"   simply-kanban-switch-board)
+    ("g" "refresh"        simply-kanban-refresh :transient t)
+    ("q" "quit board"     quit-window)]])
 
 (defun simply-kanban--open (spec)
   "Build and display a kanban board for SPEC.

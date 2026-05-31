@@ -26,6 +26,8 @@ Clone and load:
 (require 'simply-kanban)
 #+end_src
 
+The only dependency is =transient= (used for the =SPC= menu), which is bundled with Emacs 28.1+; on Emacs 27.2 install it from GNU ELPA.
+
 * Usage
 
 Open an Org file with TODO headings and run =M-x simply-kanban= for a board of the current buffer, or =M-x simply-kanban-agenda= for a board aggregating all your =org-agenda-files=.
@@ -51,7 +53,10 @@ A header-line shows the source and the key reminders.  Columns expand to fill th
 | =F=       | toggle follow mode (show heading as you move)        |
 | =B=       | switch board (multi-board files only)                |
 | =g=       | refresh                                              |
+| =SPC= / =?= | open the transient menu                            |
 | =q=       | quit                                                 |
+
+Press =SPC= (or =?=) for a =transient= menu grouping every command (Navigate / Move-Edit / Reveal / Board), modelled on the menu in [[https://github.com/captainflasmr/simply-annotate][simply-annotate]].
 
 The card at point is highlighted, and navigating moves the highlight onto the new card.
 
