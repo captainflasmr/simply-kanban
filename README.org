@@ -44,19 +44,27 @@ keywords, and each card shows which file it comes from (=» file.org=).  Moving 
 card follows that card's *own* file workflow and is written back to that file,
 so files using different keyword sequences coexist safely.
 
-| Key                | Action                              |
-|--------------------+-------------------------------------|
-| =n= / =p=          | next / previous card                |
-| =TAB= / =S-TAB=    | next / previous column (also =f=/=b=) |
-| =}= / =S-right=    | advance card to the next stage      |
-| ={= / =S-left=     | send card back a stage              |
-| =RET=              | jump to the heading in the Org file |
-| =g=                | refresh                             |
-| =q=                | quit                                |
+A header-line shows the source and the key reminders.  Columns expand to fill
+the board window; after resizing the window press =g= to refit them.
+
+| Key             | Action                                          |
+|-----------------+-------------------------------------------------|
+| =n= / =p=       | move down / up the cards in a column            |
+| =f= / =b=       | move across columns (also =TAB= / =S-TAB=), wrapping |
+| =}= / ={=       | advance / retreat card a stage                  |
+| =s=             | set status (choose any stage)                   |
+| =RET=           | jump to the heading in the Org file             |
+| =F=             | toggle follow mode (show heading as you move)   |
+| =g=             | refresh                                         |
+| =q=             | quit                                            |
+
+The card at point is highlighted, and navigating moves the highlight onto the
+new card.
 
 * Customisation
 
-- =simply-kanban-column-width= (default 30) — width of each column.
+- =simply-kanban-min-column-width= (default 24) — columns expand to fill the
+  window but never go narrower than this.
 - =simply-kanban-column-gap= (default 2) — spaces between columns.
 - =simply-kanban-buffer-name= — name of the board buffer.
 - =simply-kanban-auto-refresh= (default =t=) — refresh the board automatically

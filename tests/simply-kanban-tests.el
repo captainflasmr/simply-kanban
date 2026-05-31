@@ -112,6 +112,70 @@ BODY runs with `board' current."
       (simply-kanban-prev-card)
       (should (= (point) p1)))))
 
+(ert-deftest sk-test-grid-navigation ()
+  "n/p move within a column (rows); f/b move across columns, wrapping."
+  (sk-test-with-board "#+TODO: TODO DOING | DONE\n\n* TODO a\n* TODO b\n* DOING c\n* DONE d\n"
+    (cl-flet ((coord () (simply-kanban--coord (simply-kanban--grid))))
+      (goto-char (point-min))
+      (simply-kanban-next-card)
+      (should (equal (coord) '(0 . 0)))   ; first TODO card
+      (simply-kanban-next-card)
+      (should (equal (coord) '(0 . 1)))   ; n -> down the TODO column
+      (simply-kanban-next-column)
+      (should (equal (coord) '(1 . 0)))   ; f -> DOING column (row clamped)
+      (simply-kanban-next-column)
+      (should (equal (coord) '(2 . 0)))   ; f -> DONE column
+      (simply-kanban-next-column)
+      (should (equal (coord) '(0 . 0)))   ; f wraps back to TODO
+      (simply-kanban-prev-card)
+      (should (equal (coord) '(0 . 0))))))  ; p at top is a no-op
+
+(ert-deftest sk-test-highlight-follows-point ()
+  "Navigating cards moves the highlight onto the new card."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO a\n* TODO b\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (let ((card1 simply-kanban--current-card))
+      (should card1)
+      (should simply-kanban--highlight-overlays)
+      (simply-kanban-next-card)
+      (should-not (eq simply-kanban--current-card card1))   ; moved to a new card
+      (should simply-kanban--highlight-overlays))))
+
+;;; Window fitting
+
+(ert-deftest sk-test-available-width-tracks-window ()
+  "`--available-width' reflects the width of the board's window."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO a\n"
+    (set-window-buffer (selected-window) (current-buffer))
+    (should (= (simply-kanban--available-width)
+               (max 20 (window-width (selected-window)))))))
+
+(ert-deftest sk-test-column-width-fills-width ()
+  "Columns divide the available width (minus gaps) between them."
+  (let ((simply-kanban-min-column-width 10)
+        (simply-kanban-column-gap 2))
+    (cl-letf (((symbol-function 'simply-kanban--available-width)
+               (lambda () 100)))
+      ;; 4 columns, 3 gaps of 2 => (100 - 6) / 4 = 23.
+      (should (= (simply-kanban--column-width 4) 23))
+      ;; Narrow window clamps to the configured minimum.
+      (should (= (simply-kanban--column-width 20) 10)))))
+
+(ert-deftest sk-test-refresh-preserves-card ()
+  "Refresh (e.g. on resize) keeps the same heading selected."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO a\n* TODO b\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (simply-kanban-next-card)            ; on the second card
+    (let ((card (simply-kanban--marker-at-point)))
+      (should card)
+      (simply-kanban-refresh)
+      (let ((now (simply-kanban--marker-at-point)))
+        (should now)
+        (should (eq (marker-buffer now) (marker-buffer card)))
+        (should (= (marker-position now) (marker-position card)))))))
+
 ;;; Moving cards (write-back to Org)
 
 (ert-deftest sk-test-set-state-changes-org ()
@@ -223,12 +287,39 @@ BODY runs with `board' current."
 ;;; Keymap wiring
 
 (ert-deftest sk-test-keymap ()
-  "The board keymap binds the core commands."
+  "The board keymap binds the core commands, aligned with simply-annotate."
   (should (keymapp simply-kanban-mode-map))
   (should (eq (lookup-key simply-kanban-mode-map (kbd "RET")) 'simply-kanban-goto))
   (should (eq (lookup-key simply-kanban-mode-map "}") 'simply-kanban-advance))
   (should (eq (lookup-key simply-kanban-mode-map "{") 'simply-kanban-retreat))
+  (should (eq (lookup-key simply-kanban-mode-map "s") 'simply-kanban-set-status))
+  (should (eq (lookup-key simply-kanban-mode-map "F") 'simply-kanban-toggle-follow))
   (should (eq (lookup-key simply-kanban-mode-map "n") 'simply-kanban-next-card)))
+
+;;; Dynamic column width
+
+(ert-deftest sk-test-column-width ()
+  "Columns fill the available width but never drop below the minimum."
+  (let ((simply-kanban-min-column-width 24)
+        (simply-kanban-column-gap 2))
+    ;; Many columns -> clamped to the minimum.
+    (should (= (simply-kanban--column-width 20) 24))
+    ;; A couple of columns -> wider than the minimum on a normal frame.
+    (should (>= (simply-kanban--column-width 2) 24))))
+
+(ert-deftest sk-test-set-status ()
+  "`simply-kanban-set-status' writes the chosen keyword back to Org."
+  (sk-test-with-board "#+TODO: TODO DOING | DONE\n\n* TODO Parser\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "DONE")))
+      (simply-kanban-set-status))
+    (with-current-buffer src
+      (goto-char (point-min))
+      (re-search-forward "Parser")
+      (org-back-to-heading t)
+      (should (string= (org-get-todo-state) "DONE")))))
 
 (provide 'simply-kanban-tests)
 ;;; simply-kanban-tests.el ends here

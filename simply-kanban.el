@@ -52,8 +52,9 @@
   :group 'org
   :prefix "simply-kanban-")
 
-(defcustom simply-kanban-column-width 30
-  "Width in characters of each kanban column."
+(defcustom simply-kanban-min-column-width 24
+  "Minimum width in characters of each kanban column.
+Columns otherwise expand to fill the board window, divided evenly."
   :type 'integer
   :group 'simply-kanban)
 
@@ -77,6 +78,11 @@
   "Face for kanban column headers."
   :group 'simply-kanban)
 
+(defface simply-kanban-current-card
+  '((t :inherit highlight :weight bold))
+  "Face used to highlight the card at point."
+  :group 'simply-kanban)
+
 ;;; Board state (buffer-local in the board buffer)
 
 (defvar-local simply-kanban--source-spec nil
@@ -90,6 +96,15 @@ buffers on every render so the board can pick up new files.")
 
 (defvar-local simply-kanban--keywords nil
   "Ordered list of TODO keywords forming the board's columns.")
+
+(defvar-local simply-kanban--follow nil
+  "When non-nil, navigating cards also shows the heading in its file.")
+
+(defvar-local simply-kanban--highlight-overlays nil
+  "Overlays bolding the regions of the card at point.")
+
+(defvar-local simply-kanban--current-card nil
+  "The marker identifying the currently highlighted card.")
 
 (defvar simply-kanban--multi-source nil
   "Bound non-nil while rendering a board that spans more than one file.
@@ -218,16 +233,36 @@ Each returned string is exactly WIDTH columns wide."
       (push (simply-kanban--pad "" width) cells))
     (nreverse cells)))
 
+(defun simply-kanban--available-width ()
+  "Return the usable character width for laying out columns.
+Measured from the selected window -- which is the board window whenever
+the board is rendered (on open, just after `pop-to-buffer', and on
+\\[simply-kanban-refresh]) -- exactly as simply-annotate's kanban does.
+Using the selected window (rather than `get-buffer-window') ensures the
+width tracks the window you are actually looking at and resizing, even
+if the board buffer happens to be shown in more than one window."
+  (max 20 (window-width)))
+
+(defun simply-kanban--column-width (ncols)
+  "Return the per-column width for NCOLS columns filling the board window."
+  (if (<= ncols 0)
+      simply-kanban-min-column-width
+    (max simply-kanban-min-column-width
+         (/ (- (simply-kanban--available-width)
+               (* (1- ncols) simply-kanban-column-gap))
+            ncols))))
+
 (defun simply-kanban--render (board-buffer spec)
   "Render the kanban board described by SPEC into BOARD-BUFFER.
-SPEC is resolved to a list of Org buffers via `simply-kanban--spec-buffers'."
+SPEC is resolved to a list of Org buffers via `simply-kanban--spec-buffers'.
+Columns expand to fill the board window (see `simply-kanban-min-column-width')."
   (with-current-buffer board-buffer
     (let* ((inhibit-read-only t)
            (buffers (simply-kanban--spec-buffers spec))
            (simply-kanban--multi-source (> (length buffers) 1))
            (tasks (simply-kanban--collect-all buffers))
            (keywords (simply-kanban--merge-keywords buffers))
-           (width simply-kanban-column-width)
+           (width (simply-kanban--column-width (length keywords)))
            (gap (make-string simply-kanban-column-gap ?\s))
            (columns (mapcar (lambda (kw) (simply-kanban--column-cells kw tasks width))
                             keywords))
@@ -268,58 +303,104 @@ SPEC is resolved to a list of Org buffers via `simply-kanban--spec-buffers'."
   "Return the source marker for the card at point, or nil."
   (get-text-property (point) 'simply-kanban-marker))
 
-;;; Navigation commands
+;;; Grid navigation
+;;
+;; Cards form a 2D grid: columns are TODO keywords, rows are the cards
+;; stacked within a column.  `n'/`p' move vertically within a column and
+;; `f'/`b' (TAB/S-TAB) move horizontally across columns, keeping the row.
+
+(defun simply-kanban--grid ()
+  "Return a vector of columns, each a list of (POS . MARKER) in row order."
+  (let* ((ncols (length simply-kanban--keywords))
+         (grid (make-vector (max 1 ncols) nil)))
+    (dolist (a (simply-kanban--anchors))
+      (let* ((kw (get-text-property (car a) 'simply-kanban-keyword))
+             (col (cl-position kw simply-kanban--keywords :test #'equal)))
+        (when col (push a (aref grid col)))))
+    (dotimes (c (length grid))
+      (aset grid c (nreverse (aref grid c))))
+    grid))
+
+(defun simply-kanban--coord (grid)
+  "Return (COLUMN . ROW) of the card at point within GRID, or nil."
+  (let ((card (simply-kanban--marker-at-point)))
+    (when card
+      (catch 'hit
+        (dotimes (c (length grid))
+          (let ((row 0))
+            (dolist (a (aref grid c))
+              (when (eq (cdr a) card) (throw 'hit (cons c row)))
+              (setq row (1+ row)))))
+        nil))))
+
+(defun simply-kanban--first-anchor (grid)
+  "Return the first card anchor in GRID, or nil."
+  (catch 'hit
+    (dotimes (c (length grid))
+      (when (aref grid c) (throw 'hit (car (aref grid c)))))
+    nil))
+
+(defun simply-kanban--goto-card (anchor)
+  "Move point to ANCHOR and update the highlight and follow view."
+  (when anchor
+    (goto-char (car anchor))
+    (simply-kanban--highlight-card)
+    (simply-kanban--follow-card)))
 
 (defun simply-kanban-next-card ()
-  "Move point to the next card."
+  "Move down to the next card in the same column."
   (interactive)
-  (let ((next (seq-find (lambda (a) (> (car a) (point)))
-                        (simply-kanban--anchors))))
-    (if next (goto-char (car next)) (message "No next card"))))
+  (let* ((grid (simply-kanban--grid))
+         (coord (simply-kanban--coord grid)))
+    (if (null coord)
+        (simply-kanban--goto-card (simply-kanban--first-anchor grid))
+      (let* ((column (aref grid (car coord)))
+             (row (1+ (cdr coord))))
+        (if (< row (length column))
+            (simply-kanban--goto-card (nth row column))
+          (message "Bottom of column"))))))
 
 (defun simply-kanban-prev-card ()
-  "Move point to the previous card."
+  "Move up to the previous card in the same column."
   (interactive)
-  (let ((prev (seq-find (lambda (a) (< (car a) (point)))
-                        (reverse (simply-kanban--anchors)))))
-    (if prev (goto-char (car prev)) (message "No previous card"))))
+  (let* ((grid (simply-kanban--grid))
+         (coord (simply-kanban--coord grid)))
+    (if (null coord)
+        (simply-kanban--goto-card (simply-kanban--first-anchor grid))
+      (let* ((column (aref grid (car coord)))
+             (row (1- (cdr coord))))
+        (if (>= row 0)
+            (simply-kanban--goto-card (nth row column))
+          (message "Top of column"))))))
 
-(defun simply-kanban--column-header-pos (keyword)
-  "Return the buffer position of KEYWORD's column header, or nil."
-  (let ((pos (point-min)) found)
-    (while (and (not found) pos)
-      (when (equal keyword (get-text-property pos 'simply-kanban-keyword))
-        (setq found pos))
-      (setq pos (next-single-property-change pos 'simply-kanban-keyword)))
-    found))
-
-(defun simply-kanban--goto-column (keyword)
-  "Move point to the first card of KEYWORD's column, or its header."
-  (let ((card (seq-find (lambda (a)
-                          (equal keyword
-                                 (get-text-property (car a) 'simply-kanban-keyword)))
-                        (simply-kanban--anchors))))
-    (cond (card (goto-char (car card)))
-          ((simply-kanban--column-header-pos keyword)
-           (goto-char (simply-kanban--column-header-pos keyword))
-           (message "No cards in %s" keyword))
-          (t (message "No such column")))))
+(defun simply-kanban--move-column (dir)
+  "Move to the nearest card DIR columns away, wrapping around.
+Keeps the current row where possible."
+  (let* ((grid (simply-kanban--grid))
+         (ncols (length grid))
+         (coord (simply-kanban--coord grid)))
+    (if (null coord)
+        (simply-kanban--goto-card (simply-kanban--first-anchor grid))
+      (let ((col (car coord))
+            (row (cdr coord)))
+        (cl-loop for i from 1 below ncols
+                 for c = (mod (+ col (* dir i)) ncols)
+                 for column = (aref grid c)
+                 when column
+                 do (simply-kanban--goto-card
+                     (nth (min row (1- (length column))) column))
+                 and return t
+                 finally (message "No other column"))))))
 
 (defun simply-kanban-next-column ()
-  "Move to the first card of the next column."
+  "Move to the same row in the next column, wrapping around."
   (interactive)
-  (let* ((cur (or (simply-kanban--column-at-point) (car simply-kanban--keywords)))
-         (idx (cl-position cur simply-kanban--keywords :test #'equal))
-         (next (and idx (nth (1+ idx) simply-kanban--keywords))))
-    (if next (simply-kanban--goto-column next) (message "Last column"))))
+  (simply-kanban--move-column 1))
 
 (defun simply-kanban-prev-column ()
-  "Move to the first card of the previous column."
+  "Move to the same row in the previous column, wrapping around."
   (interactive)
-  (let* ((cur (or (simply-kanban--column-at-point) (car (last simply-kanban--keywords))))
-         (idx (cl-position cur simply-kanban--keywords :test #'equal))
-         (prev (and idx (> idx 0) (nth (1- idx) simply-kanban--keywords))))
-    (if prev (simply-kanban--goto-column prev) (message "First column"))))
+  (simply-kanban--move-column -1))
 
 ;;; Actions
 
@@ -353,7 +434,9 @@ KEYWORD must be valid in the heading's own Org file."
                           (eq (marker-buffer m) (marker-buffer marker))
                           (= (marker-position m) (marker-position marker)))))
                  (simply-kanban--anchors))))
-    (when target (goto-char (car target)))))
+    (when target
+      (goto-char (car target))
+      (simply-kanban--highlight-card))))
 
 (defun simply-kanban--move (delta)
   "Move the card at point DELTA stages along its file's workflow.
@@ -385,17 +468,33 @@ files that use different workflows."
   (interactive)
   (simply-kanban--move -1))
 
+(defun simply-kanban-set-status ()
+  "Set the card at point to a stage chosen with `completing-read'.
+Candidates are the keywords of the card's own Org file."
+  (interactive)
+  (let ((marker (simply-kanban--marker-at-point)))
+    (if (not (and marker (buffer-live-p (marker-buffer marker))))
+        (message "Point is not on a card")
+      (let* ((kws (simply-kanban--source-keywords (marker-buffer marker)))
+             (new (completing-read "Status: " kws nil t)))
+        (when (and new (not (string-empty-p new)))
+          (simply-kanban--set-state marker new)
+          (simply-kanban-refresh)
+          (simply-kanban--goto-marker marker)
+          (message "%s" new))))))
+
 (defun simply-kanban-refresh ()
-  "Rebuild the board, re-resolving its source spec."
+  "Rebuild the board, re-resolving its source spec.
+The card at point is kept selected across the rebuild."
   (interactive)
   (unless (derived-mode-p 'simply-kanban-mode)
     (user-error "Not in a kanban board"))
   (let ((spec simply-kanban--source-spec)
-        (pt (point)))
+        (card (simply-kanban--marker-at-point)))
     (unless spec
       (user-error "This board has no source"))
     (simply-kanban--render (current-buffer) spec)
-    (goto-char (min pt (point-max)))))
+    (when card (simply-kanban--goto-marker card))))
 
 ;;; Auto-refresh
 
@@ -432,6 +531,55 @@ Installed buffer-locally on the board buffer's `kill-buffer-hook'."
       (with-current-buffer source
         (add-hook 'after-save-hook #'simply-kanban--after-source-save nil t)))))
 
+;;; Follow mode and card highlighting
+
+(defun simply-kanban--follow-card ()
+  "When follow mode is on, show the heading of the card at point."
+  (when simply-kanban--follow
+    (let ((marker (simply-kanban--marker-at-point)))
+      (when (and marker (buffer-live-p (marker-buffer marker)))
+        (save-selected-window
+          (let ((win (display-buffer (marker-buffer marker))))
+            (when (window-live-p win)
+              (with-selected-window win
+                (goto-char marker)
+                (org-back-to-heading t)
+                (cond ((fboundp 'org-fold-show-entry) (org-fold-show-entry))
+                      ((fboundp 'org-show-entry) (org-show-entry)))
+                (recenter)))))))))
+
+(defun simply-kanban-toggle-follow ()
+  "Toggle follow mode for the board.
+When enabled, navigating between cards also reveals the heading in its file."
+  (interactive)
+  (setq simply-kanban--follow (not simply-kanban--follow))
+  (message "Follow mode %s" (if simply-kanban--follow "enabled" "disabled"))
+  (when simply-kanban--follow (simply-kanban--follow-card)))
+
+(defun simply-kanban--highlight-card ()
+  "Bold every region of the card at point, clearing any previous highlight.
+A card occupies a rectangular area, so it spans several disjoint regions
+that share the same `simply-kanban-marker' text property."
+  (when (derived-mode-p 'simply-kanban-mode)
+    (let ((card (get-text-property (point) 'simply-kanban-marker)))
+      (unless (eq card simply-kanban--current-card)
+        (setq simply-kanban--current-card card)
+        (mapc #'delete-overlay simply-kanban--highlight-overlays)
+        (setq simply-kanban--highlight-overlays nil)
+        (when card
+          (save-excursion
+            (goto-char (point-min))
+            (while (< (point) (point-max))
+              (let ((end (or (next-single-property-change
+                              (point) 'simply-kanban-marker)
+                             (point-max))))
+                (when (eq (get-text-property (point) 'simply-kanban-marker) card)
+                  (let ((ov (make-overlay (point) end)))
+                    (overlay-put ov 'face 'simply-kanban-current-card)
+                    (overlay-put ov 'priority 100)
+                    (push ov simply-kanban--highlight-overlays)))
+                (goto-char end)))))))))
+
 ;;; Mode
 
 (defvar simply-kanban-mode-map
@@ -445,12 +593,21 @@ Installed buffer-locally on the board buffer's `kill-buffer-hook'."
     (define-key map (kbd "RET") #'simply-kanban-goto)
     (define-key map (kbd "}") #'simply-kanban-advance)
     (define-key map (kbd "{") #'simply-kanban-retreat)
-    (define-key map (kbd "<S-right>") #'simply-kanban-advance)
-    (define-key map (kbd "<S-left>") #'simply-kanban-retreat)
+    (define-key map (kbd "s") #'simply-kanban-set-status)
+    (define-key map (kbd "F") #'simply-kanban-toggle-follow)
     (define-key map (kbd "g") #'simply-kanban-refresh)
     (define-key map (kbd "q") #'quit-window)
     map)
   "Keymap for `simply-kanban-mode'.")
+
+(defun simply-kanban--header-source ()
+  "Return a propertized description of the board's source for the header-line."
+  (pcase simply-kanban--source-spec
+    (`(buffer . ,buf)
+     (propertize (if (buffer-live-p buf) (buffer-name buf) "?") 'face 'success))
+    (`(files . ,files)
+     (propertize (format "agenda (%d)" (length files)) 'face 'success))
+    (_ (propertize "—" 'face 'shadow))))
 
 (define-derived-mode simply-kanban-mode special-mode "Kanban"
   "Major mode for the Org-linked kanban board.
@@ -458,15 +615,33 @@ Installed buffer-locally on the board buffer's `kill-buffer-hook'."
 \\{simply-kanban-mode-map}"
   (setq-local truncate-lines t)
   (setq-local cursor-type 'box)
-  (hl-line-mode 1))
+  (setq header-line-format
+        '(" Kanban  "
+          (:eval (simply-kanban--header-source))
+          "   "
+          (:eval (propertize "RET" 'face 'help-key-binding)) " goto  "
+          (:eval (propertize "{/}" 'face 'help-key-binding)) " move  "
+          (:eval (propertize "s" 'face 'help-key-binding)) " status  "
+          (:eval (propertize "n/p" 'face 'help-key-binding)) " card  "
+          (:eval (propertize "TAB" 'face 'help-key-binding)) " column  "
+          (:eval (propertize "F" 'face 'help-key-binding)) " follow"
+          (:eval (if simply-kanban--follow
+                     (propertize "[ON]" 'face 'success)
+                   ""))
+          "  "
+          (:eval (propertize "g" 'face 'help-key-binding)) " refresh  "
+          (:eval (propertize "q" 'face 'help-key-binding)) " quit"))
+  (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t))
 
 (defun simply-kanban--open (spec)
-  "Build and display a kanban board for SPEC."
+  "Build and display a kanban board for SPEC.
+The buffer is displayed before rendering so columns size to the window."
   (let ((buffer (get-buffer-create simply-kanban-buffer-name)))
     (with-current-buffer buffer
-      (simply-kanban-mode)
-      (simply-kanban--render buffer spec))
-    (pop-to-buffer buffer)))
+      (unless (derived-mode-p 'simply-kanban-mode)
+        (simply-kanban-mode)))
+    (pop-to-buffer buffer)
+    (simply-kanban--render buffer spec)))
 
 ;;;###autoload
 (defun simply-kanban ()
