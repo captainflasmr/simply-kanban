@@ -92,6 +92,64 @@ Status changes and deletions are written straight back to the source file and, b
 
 Faces: =simply-kanban-current-card= (focused card), =simply-kanban-tag= (card tags), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
 
+* Kanban Feature Comparison Matrix
+
+A cross-cutting view of how Simply Kanban sits among the other kanban options for Emacs, to the best of my knowledge — things move, so treat versions as approximate.
+
+| Feature                         | [[https://github.com/gizmomogwai/org-kanban][org-kanban]] | [[https://hg.sr.ht/~arnebab/kanban][kanban.el]] | [[https://github.com/org-trello/org-trello][org-trello]] | simply-kanban |
+|---------------------------------+------------+-----------+------------+---------------|
+| Org file is single source       | Yes        | Yes       | No         | Yes           |
+| No separate database            | Yes        | Yes       | No         | Yes           |
+| Columns from =#+TODO= keywords  | Yes        | Yes       | n/a        | Yes           |
+| Live board buffer (not in-file) | No         | No        | No         | Yes           |
+| Move card with one keystroke    | Yes        | No        | Yes        | Yes           |
+| Keyboard-driven navigation      | Partial    | No        | No         | Yes           |
+| Transient menu                  | No         | No        | No         | Yes           |
+| Tag filtering                   | No         | No        | No         | Yes           |
+| Priority cookies shown          | No         | No        | Partial    | Yes           |
+| Inline card body / detail       | No         | No        | Yes        | Yes           |
+| Multiple boards per file        | Yes        | Yes       | Yes        | Yes           |
+| Agenda-wide aggregation         | No         | No        | No         | Yes           |
+| Follow / reveal source heading  | No         | No        | n/a        | Yes           |
+| Sort cards by priority          | No         | No        | No         | Yes           |
+| Works offline (no external svc) | Yes        | Yes       | No         | Yes           |
+| MELPA                           | Yes        | Yes       | Yes        | No            |
+| Emacs requirement               | 24.4       | —         | 24.4       | 27.2          |
+
+Simply Kanban's niche is the *live, keyboard-driven board buffer*: =org-kanban= and =kanban.el= render a static table back into the Org file (you still edit TODO states by hand or by shifting a link), while =org-trello= trades the offline, single-source model for two-way sync with a remote Trello account.  Simply Kanban keeps the Org buffer as the only source of truth and gives you a navigable board on top of it.
+
+* Feature Gaps & Roadmap
+
+Where Simply Kanban already leads is the live, keyboard-driven board buffer; what follows is the *inverse* view — capabilities the other Emacs kanban tools offer that Simply Kanban currently does *not*.  Each row is a candidate enhancement.  To the best of my knowledge — things move, so treat this as a starting point rather than gospel.
+
+| Missing / partial feature             | [[https://github.com/gizmomogwai/org-kanban][org-kanban]] | [[https://hg.sr.ht/~arnebab/kanban][kanban.el]] | [[https://github.com/org-trello/org-trello][org-trello]] | simply-kanban |
+|---------------------------------------+------------+-----------+------------+---------------|
+| In-file table (exports with document) | Yes        | Yes       | No         | No            |
+| Clickable heading links in board      | Yes        | No        | No         | Partial       |
+| Arbitrary match/query filter          | Yes        | No        | No         | Partial       |
+| Heading-depth / property scoping      | Yes        | No        | No         | No            |
+| Add / create a card from the board    | No         | No        | Yes        | No            |
+| Edit card title/body from the board   | No         | No        | Yes        | No            |
+| Deadline / scheduled badges           | No         | No        | Yes        | No            |
+| Checklist / subtask progress          | No         | No        | Yes        | No            |
+| Labels / colour coding                | No         | No        | Yes        | No            |
+| Assignees / members                   | No         | No        | Yes        | No            |
+| Comments on cards                     | No         | No        | Yes        | No            |
+| Card count per column                 | No         | No        | Yes        | No            |
+| WIP limits per column                 | No         | No        | Partial    | No            |
+| Swimlanes (group rows by tag)         | No         | No        | No         | No            |
+| Mouse drag-and-drop                   | No         | No        | No         | No            |
+| Remote / cloud sync                   | No         | No        | Yes        | No            |
+| MELPA availability                    | Yes        | Yes       | Yes        | No            |
+
+Reading the gaps as a rough roadmap, three themes emerge:
+
+- *Richer cards* — deadline/scheduled badges, checklist progress, label colours and per-column WIP limits are all derivable from data already in the Org subtree (=DEADLINE=, =SCHEDULED=, checkbox stats, tags), so they need no new storage — only rendering.  These are the cheapest wins and several (=WIP limits=, =deadline badges=, =swimlanes by tag=) already appear under *Status → Future ideas*.
+- *Editing from the board* — add-card, rename, and inline body editing would close the gap with =org-trello='s card creation while keeping the Org buffer as the single source of truth.
+- *Broader selection* — =org-kanban='s =:match= query and depth scoping point at a more flexible card-selection model than the current TODO-keyword + single-tag filter (which is why those two rows are marked =Partial=).
+
+Deliberately *out of scope*: remote/cloud sync, assignees and comments are =org-trello='s domain via the Trello service and run counter to Simply Kanban's offline, single-file model — listed for completeness, not as planned work.
+
 * Development
 
 There is an ERT suite and a =Makefile=:
