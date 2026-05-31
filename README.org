@@ -1,0 +1,54 @@
+#+title: Simply Kanban: An Org-linked Kanban Board
+#+author: James Dyer
+#+email: captainflasmr@gmail.com
+#+language: en
+#+options: ':t toc:nil author:nil email:nil num:nil title:nil
+#+startup: showall
+
+A lightweight kanban board for Org files.  The board is a live view of the
+current Org buffer — there is *no separate database*, the Org file is the
+single source of truth.
+
+- *Columns* are the buffer's Org TODO keywords (the =#+TODO:= workflow, e.g.
+  =TODO NEXT DOING | DONE=).
+- *Cards* are the headings carrying those keywords.
+- *Moving a card* between columns changes the heading's TODO state via
+  =org-todo=, written straight back to the Org buffer.
+
+The rendering and navigation are modelled on the kanban view in
+[[https://github.com/captainflasmr/simply-annotate][simply-annotate]].
+
+* Status
+
+Early MVP (v0.1.0).  Works against the current Org buffer.  Future ideas:
+multi-file boards (agenda files), drag-style mouse moves, WIP limits,
+priority/tag filtering, scheduled/deadline badges, swimlanes by tag.
+
+* Install
+
+Clone and load:
+
+#+begin_src elisp
+(add-to-list 'load-path "/path/to/simply-kanban")
+(require 'simply-kanban)
+#+end_src
+
+* Usage
+
+Open an Org file with TODO headings and run =M-x simply-kanban=.
+
+| Key                | Action                              |
+|--------------------+-------------------------------------|
+| =n= / =p=          | next / previous card                |
+| =TAB= / =S-TAB=    | next / previous column (also =f=/=b=) |
+| =}= / =S-right=    | advance card to the next stage      |
+| ={= / =S-left=     | send card back a stage              |
+| =RET=              | jump to the heading in the Org file |
+| =g=                | refresh                             |
+| =q=                | quit                                |
+
+* Customisation
+
+- =simply-kanban-column-width= (default 30) — width of each column.
+- =simply-kanban-column-gap= (default 2) — spaces between columns.
+- =simply-kanban-buffer-name= — name of the board buffer.
