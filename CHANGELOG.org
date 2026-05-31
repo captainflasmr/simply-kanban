@@ -1,0 +1,45 @@
+#+title: Changelog
+#+author: James Dyer
+#+email: captainflasmr@gmail.com
+#+language: en
+#+options: ':t toc:nil author:nil email:nil num:nil
+
+All notable changes to Simply Kanban are documented in this file.
+
+The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]], and this project adheres to [[https://semver.org/spec/v2.0.0.html][Semantic Versioning]].
+
+* [0.2.0] - 2026-05-31
+
+** Added
+
+- Tag filtering: press ~t~ to filter the board by tag, ~T~ to clear the filter.  Active filter is shown in the header line.
+- Delete card: press ~k~ to delete the Org heading at point (with confirmation).
+- Jump to source in another window: press ~v~ to open the heading in a split window, keeping the board visible.
+- Priority sorting: new customisation option ~simply-kanban-sort-by-priority~ (default ~nil~). When enabled, cards within each column are sorted by priority (A > B > C > none).
+- Automatic column refit on window resize via ~window-size-change-functions~.
+
+** Changed
+
+- Column width calculation now uses ~window-width~ (matching simply-annotate) with robust fallback handling for edge cases.
+- Header line updated to show new keybindings: ~v~ (view), ~k~ (delete), ~t/T~ (tag filter).
+
+** Fixed
+
+- Column sizing on ~g~ (refresh) now correctly recalculates to fit the current window width.
+
+* [0.1.0] - 2026-05-31
+
+** Added
+
+- Initial release: lightweight kanban board for Org files.
+- Columns are the buffer's Org TODO keywords (the ~#+TODO:~ workflow).
+- Cards are the headings carrying those keywords.
+- Moving a card between columns changes the heading's TODO state via ~org-todo~, written straight back to the Org buffer (no separate database).
+- Navigation: ~n~/~p~ (cards), ~f~/~b~/~TAB~/~S-TAB~ (columns), wrapping.
+- Actions: ~}~/~{~ (advance/retreat stage), ~s~ (set status), ~RET~ (jump to heading).
+- Follow mode: press ~F~ to show the heading as you navigate.
+- Auto-refresh on source buffer save.
+- Multi-file aggregation via ~M-x simply-kanban-agenda~ (uses ~org-agenda-files~).
+- Each card in an aggregated board shows its source file and follows that file's own workflow.
+- ERT test suite with ~make test~, ~make compile~, ~make checkdoc~, ~make lint~.
+- GitHub Actions CI across Emacs 27.2–30.1 and snapshot.
