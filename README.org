@@ -28,6 +28,17 @@ Clone and load:
 
 The only dependency is =transient= (used for the =SPC= menu), which is bundled with Emacs 28.1+; on Emacs 27.2 install it from GNU ELPA.
 
+Or with =use-package=, binding the two entry points to global keys:
+
+#+begin_src elisp
+(use-package simply-kanban
+  :demand t
+  :load-path "~/.emacs.d/offline-packages/local-packages/simply-kanban"
+  :bind
+  ("C-c K" . simply-kanban)
+  ("C-c A" . simply-kanban-agenda))
+#+end_src
+
 * Usage
 
 Open an Org file with TODO headings and run =M-x simply-kanban= for a board of the current buffer, or =M-x simply-kanban-agenda= for a board aggregating all your =org-agenda-files=.
