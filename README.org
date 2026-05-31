@@ -5,24 +5,17 @@
 #+options: ':t toc:nil author:nil email:nil num:nil title:nil
 #+startup: showall
 
-A lightweight kanban board for Org files.  The board is a live view of the
-current Org buffer — there is *no separate database*, the Org file is the
-single source of truth.
+A lightweight kanban board for Org files.  The board is a live view of the current Org buffer — there is *no separate database*, the Org file is the single source of truth.
 
-- *Columns* are the buffer's Org TODO keywords (the =#+TODO:= workflow, e.g.
-  =TODO NEXT DOING | DONE=).
+- *Columns* are the buffer's Org TODO keywords (the =#+TODO:= workflow, e.g.  =TODO NEXT DOING | DONE=).
 - *Cards* are the headings carrying those keywords.
-- *Moving a card* between columns changes the heading's TODO state via
-  =org-todo=, written straight back to the Org buffer.
+- *Moving a card* between columns changes the heading's TODO state via =org-todo=, written straight back to the Org buffer.
 
-The rendering and navigation are modelled on the kanban view in
-[[https://github.com/captainflasmr/simply-annotate][simply-annotate]].
+The rendering and navigation are modelled on the kanban view in [[https://github.com/captainflasmr/simply-annotate][simply-annotate]].
 
 * Status
 
-Early MVP (v0.1.0).  Works against the current Org buffer or all agenda files.
-Strictly keyboard-driven.  Future ideas: WIP limits, priority/tag filtering,
-scheduled/deadline badges, swimlanes by tag.
+Early MVP (v0.1.0).  Works against the current Org buffer or all agenda files.  Strictly keyboard-driven.  Future ideas: WIP limits, priority/tag filtering, scheduled/deadline badges, swimlanes by tag.
 
 * Install
 
@@ -35,40 +28,36 @@ Clone and load:
 
 * Usage
 
-Open an Org file with TODO headings and run =M-x simply-kanban= for a board of
-the current buffer, or =M-x simply-kanban-agenda= for a board aggregating all
-your =org-agenda-files=.
+Open an Org file with TODO headings and run =M-x simply-kanban= for a board of the current buffer, or =M-x simply-kanban-agenda= for a board aggregating all your =org-agenda-files=.
 
-In an aggregated board the columns are the *union* of the agenda files' TODO
-keywords, and each card shows which file it comes from (=» file.org=).  Moving a
-card follows that card's *own* file workflow and is written back to that file,
-so files using different keyword sequences coexist safely.
+In an aggregated board the columns are the *union* of the agenda files' TODO keywords, and each card shows which file it comes from (=» file.org=).  Moving a card follows that card's *own* file workflow and is written back to that file, so files using different keyword sequences coexist safely.
 
-A header-line shows the source and the key reminders.  Columns expand to fill
-the board window; after resizing the window press =g= to refit them.
+A header-line shows the source and the key reminders.  Columns expand to fill the board window; after resizing the window press =g= to refit them.
 
-| Key             | Action                                          |
-|-----------------+-------------------------------------------------|
-| =n= / =p=       | move down / up the cards in a column            |
-| =f= / =b=       | move across columns (also =TAB= / =S-TAB=), wrapping |
-| =}= / ={=       | advance / retreat card a stage                  |
-| =s=             | set status (choose any stage)                   |
-| =RET=           | jump to the heading in the Org file             |
-| =F=             | toggle follow mode (show heading as you move)   |
-| =g=             | refresh                                         |
-| =q=             | quit                                            |
+| Key       | Action                                               |
+|-----------+------------------------------------------------------|
+| =n= / =p= | move down / up the cards in a column                 |
+| =f= / =b= | move across columns (also =TAB= / =S-TAB=), wrapping |
+| =}= / ={= | advance / retreat card a stage                       |
+| =s=       | set status (choose any stage)                        |
+| =RET=     | jump to the heading in the Org file                  |
+| =v=       | jump to the heading in another window                |
+| =k=       | delete the heading (with confirmation)               |
+| =t=       | filter board by tag                                  |
+| =T=       | clear tag filter                                     |
+| =F=       | toggle follow mode (show heading as you move)        |
+| =g=       | refresh                                              |
+| =q=       | quit                                                 |
 
-The card at point is highlighted, and navigating moves the highlight onto the
-new card.
+The card at point is highlighted, and navigating moves the highlight onto the new card.
 
 * Customisation
 
-- =simply-kanban-min-column-width= (default 24) — columns expand to fill the
-  window but never go narrower than this.
+- =simply-kanban-min-column-width= (default 24) — columns expand to fill the window but never go narrower than this.
 - =simply-kanban-column-gap= (default 2) — spaces between columns.
 - =simply-kanban-buffer-name= — name of the board buffer.
-- =simply-kanban-auto-refresh= (default =t=) — refresh the board automatically
-  whenever its source Org buffer is saved.
+- =simply-kanban-auto-refresh= (default =t=) — refresh the board automatically whenever its source Org buffer is saved.
+- =simply-kanban-sort-by-priority= (default =nil=) — when non-nil, sort cards within each column by priority (A > B > C > none).
 
 * Development
 
@@ -83,5 +72,4 @@ make deps       # install package-lint into ./.elpa
 make all        # compile + test + checkdoc
 #+end_src
 
-A GitHub Actions workflow (=.github/workflows/ci.yml=) runs these across Emacs
-27.2–30.1 and snapshot on every push and pull request.
+A GitHub Actions workflow (=.github/workflows/ci.yml=) runs these across Emacs 27.2–30.1 and snapshot on every push and pull request.

@@ -1,7 +1,7 @@
 ;;; simply-kanban.el --- Org-linked kanban board -*- lexical-binding: t; -*-
 
 ;; Author: James Dyer <captainflasmr@gmail.com>
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "27.2"))
 ;; Keywords: outlines, convenience, tools, org
 ;; URL: https://github.com/captainflasmr/simply-kanban
@@ -34,7 +34,13 @@
 ;;   TAB / S-TAB    next / previous column   (also f / b)
 ;;   } / S-right    advance card to the next stage
 ;;   { / S-left     send card back a stage
+;;   s              set status (choose any stage)
 ;;   RET            jump to the heading in the Org buffer
+;;   v              jump to the heading in another window
+;;   k              delete the heading (with confirmation)
+;;   t              filter board by tag
+;;   T              clear tag filter
+;;   F              toggle follow mode
 ;;   g              refresh
 ;;   q              quit
 
@@ -73,6 +79,11 @@ Columns otherwise expand to fill the board window, divided evenly."
   :type 'boolean
   :group 'simply-kanban)
 
+(defcustom simply-kanban-sort-by-priority nil
+  "When non-nil, sort cards within each column by priority (A > B > C > none)."
+  :type 'boolean
+  :group 'simply-kanban)
+
 (defface simply-kanban-column-header
   '((t :weight bold :inherit org-document-title))
   "Face for kanban column headers."
@@ -105,6 +116,9 @@ buffers on every render so the board can pick up new files.")
 
 (defvar-local simply-kanban--current-card nil
   "The marker identifying the currently highlighted card.")
+
+(defvar-local simply-kanban--tag-filter nil
+  "When non-nil, only show cards carrying this tag.")
 
 (defvar simply-kanban--multi-source nil
   "Bound non-nil while rendering a board that spans more than one file.
@@ -209,12 +223,27 @@ buffer (or buffers sharing a workflow) the natural order is kept."
     (push (concat "└" (make-string (- width 2) ?─) "┘") lines)
     (nreverse lines)))
 
+(defun simply-kanban--priority-order (prio)
+  "Return a sort key for priority character PRIO.
+Lower numbers sort first: A=0, B=1, C=2, nil=3."
+  (pcase prio
+    (?A 0)
+    (?B 1)
+    (?C 2)
+    (_ 3)))
+
 (defun simply-kanban--column-cells (keyword tasks width)
   "Return the propertized line-strings for the KEYWORD column.
 TASKS is the full task list; only those matching KEYWORD are shown.
 Each returned string is exactly WIDTH columns wide."
   (let* ((col-tasks (seq-filter (lambda (tk) (equal (plist-get tk :keyword) keyword))
                                 tasks))
+         (col-tasks (if simply-kanban-sort-by-priority
+                        (sort col-tasks
+                              (lambda (a b)
+                                (< (simply-kanban--priority-order (plist-get a :priority))
+                                   (simply-kanban--priority-order (plist-get b :priority)))))
+                      col-tasks))
          (header (propertize (format " %s · %d" keyword (length col-tasks))
                              'face 'simply-kanban-column-header
                              'simply-kanban-keyword keyword))
@@ -234,14 +263,12 @@ Each returned string is exactly WIDTH columns wide."
     (nreverse cells)))
 
 (defun simply-kanban--available-width ()
-  "Return the usable character width for laying out columns.
-Measured from the selected window -- which is the board window whenever
-the board is rendered (on open, just after `pop-to-buffer', and on
-\\[simply-kanban-refresh]) -- exactly as simply-annotate's kanban does.
-Using the selected window (rather than `get-buffer-window') ensures the
-width tracks the window you are actually looking at and resizing, even
-if the board buffer happens to be shown in more than one window."
-  (max 20 (window-width)))
+  "Return the usable character width for laying out columns."
+  (let ((win (or (get-buffer-window simply-kanban-buffer-name)
+                 (selected-window))))
+    (if (window-live-p win)
+        (max 20 (window-width win))
+      80)))
 
 (defun simply-kanban--column-width (ncols)
   "Return the per-column width for NCOLS columns filling the board window."
@@ -252,36 +279,41 @@ if the board buffer happens to be shown in more than one window."
                (* (1- ncols) simply-kanban-column-gap))
             ncols))))
 
-(defun simply-kanban--render (board-buffer spec)
-  "Render the kanban board described by SPEC into BOARD-BUFFER.
+(defun simply-kanban--render (spec)
+  "Render the kanban board described by SPEC into the current buffer.
 SPEC is resolved to a list of Org buffers via `simply-kanban--spec-buffers'.
-Columns expand to fill the board window (see `simply-kanban-min-column-width')."
-  (with-current-buffer board-buffer
-    (let* ((inhibit-read-only t)
-           (buffers (simply-kanban--spec-buffers spec))
-           (simply-kanban--multi-source (> (length buffers) 1))
-           (tasks (simply-kanban--collect-all buffers))
-           (keywords (simply-kanban--merge-keywords buffers))
-           (width (simply-kanban--column-width (length keywords)))
-           (gap (make-string simply-kanban-column-gap ?\s))
-           (columns (mapcar (lambda (kw) (simply-kanban--column-cells kw tasks width))
-                            keywords))
-           (nrows (apply #'max 0 (mapcar #'length columns))))
-      (erase-buffer)
-      (setq simply-kanban--source-spec spec
-            simply-kanban--source-buffers buffers
-            simply-kanban--keywords keywords)
-      (if (null buffers)
-          (insert "No source Org buffers.\n")
-        (dotimes (row nrows)
-          (let ((segments (mapcar (lambda (col)
-                                    (or (nth row col)
-                                        (simply-kanban--pad "" width)))
-                                  columns)))
-            (insert (string-join segments gap) "\n"))))
-      (simply-kanban--install-hooks board-buffer buffers)
-      (goto-char (point-min))
-      (simply-kanban-next-card))))
+Columns expand to fill the board window (see `simply-kanban-min-column-width').
+Must be called with the board buffer current and its window selected."
+  (let* ((inhibit-read-only t)
+         (buffers (simply-kanban--spec-buffers spec))
+         (simply-kanban--multi-source (> (length buffers) 1))
+         (tasks (simply-kanban--collect-all buffers))
+         (tasks (if simply-kanban--tag-filter
+                    (cl-remove-if-not
+                     (lambda (tk) (member simply-kanban--tag-filter (plist-get tk :tags)))
+                     tasks)
+                  tasks))
+         (keywords (simply-kanban--merge-keywords buffers))
+         (width (simply-kanban--column-width (length keywords)))
+         (gap (make-string simply-kanban-column-gap ?\s))
+         (columns (mapcar (lambda (kw) (simply-kanban--column-cells kw tasks width))
+                          keywords))
+         (nrows (apply #'max 0 (mapcar #'length columns))))
+    (erase-buffer)
+    (setq simply-kanban--source-spec spec
+          simply-kanban--source-buffers buffers
+          simply-kanban--keywords keywords)
+    (if (null buffers)
+        (insert "No source Org buffers.\n")
+      (dotimes (row nrows)
+        (let ((segments (mapcar (lambda (col)
+                                  (or (nth row col)
+                                      (simply-kanban--pad "" width)))
+                                columns)))
+          (insert (string-join segments gap) "\n"))))
+    (simply-kanban--install-hooks (current-buffer) buffers)
+    (goto-char (point-min))
+    (simply-kanban-next-card)))
 
 ;;; Navigation helpers
 
@@ -483,6 +515,57 @@ Candidates are the keywords of the card's own Org file."
           (simply-kanban--goto-marker marker)
           (message "%s" new))))))
 
+(defun simply-kanban-set-tag-filter ()
+  "Filter the board to show only cards with a given tag."
+  (interactive)
+  (let* ((buffers (simply-kanban--spec-buffers simply-kanban--source-spec))
+         (tasks (simply-kanban--collect-all buffers))
+         (all-tags (delete-dups
+                    (apply #'append (mapcar (lambda (tk) (plist-get tk :tags)) tasks))))
+         (selection (completing-read "Filter by tag: " all-tags nil t)))
+    (setq simply-kanban--tag-filter (unless (string-empty-p selection) selection))
+    (simply-kanban-refresh)
+    (if simply-kanban--tag-filter
+        (message "Tag filter: %s" simply-kanban--tag-filter)
+      (message "Cleared tag filter"))))
+
+(defun simply-kanban-clear-tag-filter ()
+  "Clear the active tag filter."
+  (interactive)
+  (setq simply-kanban--tag-filter nil)
+  (simply-kanban-refresh)
+  (message "Cleared tag filter"))
+
+(defun simply-kanban-delete ()
+  "Delete the Org heading for the card at point."
+  (interactive)
+  (let ((marker (simply-kanban--marker-at-point)))
+    (if (not (and marker (marker-buffer marker)))
+        (message "Point is not on a card")
+      (when (y-or-n-p "Delete this heading? ")
+        (with-current-buffer (marker-buffer marker)
+          (org-with-wide-buffer
+           (goto-char marker)
+           (org-back-to-heading t)
+           (delete-region (point) (org-end-of-subtree t t))))
+        (simply-kanban-refresh)
+        (message "Deleted")))))
+
+(defun simply-kanban-jump-other-window ()
+  "Jump to the Org heading for the card at point in another window."
+  (interactive)
+  (let ((marker (simply-kanban--marker-at-point)))
+    (if (not (and marker (marker-buffer marker)))
+        (message "Point is not on a card")
+      (let ((buf (marker-buffer marker))
+            (pos marker))
+        (display-buffer buf '(display-buffer-pop-up-window (inhibit-same-window . t)))
+        (with-selected-window (get-buffer-window buf)
+          (goto-char pos)
+          (org-back-to-heading t)
+          (cond ((fboundp 'org-fold-show-entry) (org-fold-show-entry))
+                ((fboundp 'org-show-entry) (org-show-entry))))))))
+
 (defun simply-kanban-refresh ()
   "Rebuild the board, re-resolving its source spec.
 The card at point is kept selected across the rebuild."
@@ -490,11 +573,16 @@ The card at point is kept selected across the rebuild."
   (unless (derived-mode-p 'simply-kanban-mode)
     (user-error "Not in a kanban board"))
   (let ((spec simply-kanban--source-spec)
-        (card (simply-kanban--marker-at-point)))
+        (card (simply-kanban--marker-at-point))
+        (win (get-buffer-window (current-buffer))))
     (unless spec
       (user-error "This board has no source"))
-    (simply-kanban--render (current-buffer) spec)
-    (when card (simply-kanban--goto-marker card))))
+    (if win
+        (with-selected-window win
+          (simply-kanban--render spec)
+          (when card (simply-kanban--goto-marker card)))
+      (simply-kanban--render spec)
+      (when card (simply-kanban--goto-marker card)))))
 
 ;;; Auto-refresh
 
@@ -520,7 +608,15 @@ Installed buffer-locally on the board buffer's `kill-buffer-hook'."
         (unless (seq-some (lambda (buf) (not (eq buf this)))
                           (simply-kanban--boards-for source))
           (with-current-buffer source
-            (remove-hook 'after-save-hook #'simply-kanban--after-source-save t)))))))
+            (remove-hook 'after-save-hook #'simply-kanban--after-source-save t)))))
+    (unless (seq-some (lambda (buf)
+                        (and (not (eq buf this))
+                             (buffer-live-p buf)
+                             (with-current-buffer buf
+                               (derived-mode-p 'simply-kanban-mode))))
+                      (buffer-list))
+      (remove-hook 'window-size-change-functions
+                   #'simply-kanban--on-window-resize))))
 
 (defun simply-kanban--install-hooks (board sources)
   "Wire up auto-refresh between BOARD and its SOURCES (a list of buffers)."
@@ -591,9 +687,13 @@ that share the same `simply-kanban-marker' text property."
     (define-key map (kbd "TAB") #'simply-kanban-next-column)
     (define-key map (kbd "<backtab>") #'simply-kanban-prev-column)
     (define-key map (kbd "RET") #'simply-kanban-goto)
+    (define-key map (kbd "v") #'simply-kanban-jump-other-window)
     (define-key map (kbd "}") #'simply-kanban-advance)
     (define-key map (kbd "{") #'simply-kanban-retreat)
     (define-key map (kbd "s") #'simply-kanban-set-status)
+    (define-key map (kbd "k") #'simply-kanban-delete)
+    (define-key map (kbd "t") #'simply-kanban-set-tag-filter)
+    (define-key map (kbd "T") #'simply-kanban-clear-tag-filter)
     (define-key map (kbd "F") #'simply-kanban-toggle-follow)
     (define-key map (kbd "g") #'simply-kanban-refresh)
     (define-key map (kbd "q") #'quit-window)
@@ -609,6 +709,20 @@ that share the same `simply-kanban-marker' text property."
      (propertize (format "agenda (%d)" (length files)) 'face 'success))
     (_ (propertize "—" 'face 'shadow))))
 
+(defun simply-kanban--on-window-resize (frame)
+  "Refit any visible kanban boards in FRAME after a window resize."
+  (let ((buffers-to-refresh nil))
+    (walk-windows
+     (lambda (win)
+       (let ((buf (window-buffer win)))
+         (with-current-buffer buf
+           (when (derived-mode-p 'simply-kanban-mode)
+             (push buf buffers-to-refresh)))))
+     nil frame)
+    (dolist (buf (delete-dups buffers-to-refresh))
+      (with-current-buffer buf
+        (simply-kanban-refresh)))))
+
 (define-derived-mode simply-kanban-mode special-mode "Kanban"
   "Major mode for the Org-linked kanban board.
 
@@ -618,10 +732,16 @@ that share the same `simply-kanban-marker' text property."
   (setq header-line-format
         '(" Kanban  "
           (:eval (simply-kanban--header-source))
+          (:eval (if simply-kanban--tag-filter
+                     (propertize (format " [tag: %s]" simply-kanban--tag-filter) 'face 'success)
+                   ""))
           "   "
           (:eval (propertize "RET" 'face 'help-key-binding)) " goto  "
+          (:eval (propertize "v" 'face 'help-key-binding)) " view  "
           (:eval (propertize "{/}" 'face 'help-key-binding)) " move  "
           (:eval (propertize "s" 'face 'help-key-binding)) " status  "
+          (:eval (propertize "k" 'face 'help-key-binding)) " delete  "
+          (:eval (propertize "t/T" 'face 'help-key-binding)) " tag  "
           (:eval (propertize "n/p" 'face 'help-key-binding)) " card  "
           (:eval (propertize "TAB" 'face 'help-key-binding)) " column  "
           (:eval (propertize "F" 'face 'help-key-binding)) " follow"
@@ -631,7 +751,8 @@ that share the same `simply-kanban-marker' text property."
           "  "
           (:eval (propertize "g" 'face 'help-key-binding)) " refresh  "
           (:eval (propertize "q" 'face 'help-key-binding)) " quit"))
-  (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t))
+  (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t)
+  (add-hook 'window-size-change-functions #'simply-kanban--on-window-resize))
 
 (defun simply-kanban--open (spec)
   "Build and display a kanban board for SPEC.
@@ -641,7 +762,7 @@ The buffer is displayed before rendering so columns size to the window."
       (unless (derived-mode-p 'simply-kanban-mode)
         (simply-kanban-mode)))
     (pop-to-buffer buffer)
-    (simply-kanban--render buffer spec)))
+    (simply-kanban--render spec)))
 
 ;;;###autoload
 (defun simply-kanban ()

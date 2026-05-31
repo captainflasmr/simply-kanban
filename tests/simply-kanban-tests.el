@@ -92,7 +92,7 @@ BODY runs with `board' current."
        (unwind-protect
            (with-current-buffer board
              (simply-kanban-mode)
-             (simply-kanban--render board (cons 'buffer src))
+             (simply-kanban--render (cons 'buffer src))
              ,@body)
          (kill-buffer board)))))
 
@@ -149,7 +149,7 @@ BODY runs with `board' current."
   (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO a\n"
     (set-window-buffer (selected-window) (current-buffer))
     (should (= (simply-kanban--available-width)
-               (max 20 (window-width (selected-window)))))))
+               (max 20 (window-body-width (selected-window)))))))
 
 (ert-deftest sk-test-column-width-fills-width ()
   "Columns divide the available width (minus gaps) between them."
@@ -250,7 +250,7 @@ BODY runs with `board' current."
     (unwind-protect
         (with-current-buffer board
           (simply-kanban-mode)
-          (simply-kanban--render board (list 'files f1 f2))
+          (simply-kanban--render (list 'files f1 f2))
           (should (= 3 (length (simply-kanban--anchors))))
           ;; DOING comes only from f1, but the union keeps a column for it.
           (should (equal simply-kanban--keywords '("TODO" "DOING" "DONE")))
@@ -271,7 +271,7 @@ BODY runs with `board' current."
         (progn
           (with-current-buffer board
             (simply-kanban-mode)
-            (simply-kanban--render board (list 'files f1 f2))
+            (simply-kanban--render (list 'files f1 f2))
             ;; Two TODO cards stacked: Alpha (f1) then Beta (f2); advance Beta.
             (goto-char (car (nth 1 (simply-kanban--anchors))))
             (simply-kanban-advance))
@@ -290,9 +290,13 @@ BODY runs with `board' current."
   "The board keymap binds the core commands, aligned with simply-annotate."
   (should (keymapp simply-kanban-mode-map))
   (should (eq (lookup-key simply-kanban-mode-map (kbd "RET")) 'simply-kanban-goto))
+  (should (eq (lookup-key simply-kanban-mode-map "v") 'simply-kanban-jump-other-window))
   (should (eq (lookup-key simply-kanban-mode-map "}") 'simply-kanban-advance))
   (should (eq (lookup-key simply-kanban-mode-map "{") 'simply-kanban-retreat))
   (should (eq (lookup-key simply-kanban-mode-map "s") 'simply-kanban-set-status))
+  (should (eq (lookup-key simply-kanban-mode-map "k") 'simply-kanban-delete))
+  (should (eq (lookup-key simply-kanban-mode-map "t") 'simply-kanban-set-tag-filter))
+  (should (eq (lookup-key simply-kanban-mode-map "T") 'simply-kanban-clear-tag-filter))
   (should (eq (lookup-key simply-kanban-mode-map "F") 'simply-kanban-toggle-follow))
   (should (eq (lookup-key simply-kanban-mode-map "n") 'simply-kanban-next-card)))
 
@@ -320,6 +324,68 @@ BODY runs with `board' current."
       (re-search-forward "Parser")
       (org-back-to-heading t)
       (should (string= (org-get-todo-state) "DONE")))))
+
+;;; Tag filtering
+
+(ert-deftest sk-test-tag-filter ()
+  "Setting a tag filter shows only cards with that tag."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha :urgent:\n* TODO Beta\n* TODO Gamma :urgent:\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (should (= 3 (length (simply-kanban--anchors))))
+    (setq simply-kanban--tag-filter "urgent")
+    (simply-kanban-refresh)
+    (should (= 2 (length (simply-kanban--anchors))))))
+
+(ert-deftest sk-test-clear-tag-filter ()
+  "Clearing the tag filter shows all cards."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha :urgent:\n* TODO Beta\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (setq simply-kanban--tag-filter "urgent")
+    (simply-kanban-refresh)
+    (should (= 1 (length (simply-kanban--anchors))))
+    (setq simply-kanban--tag-filter nil)
+    (simply-kanban-refresh)
+    (should (= 2 (length (simply-kanban--anchors))))))
+
+;;; Delete card
+
+(ert-deftest sk-test-delete-card ()
+  "Deleting a card removes the heading from the source buffer."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n* TODO Gamma\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (simply-kanban-next-card)
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t)))
+      (simply-kanban-delete))
+    (with-current-buffer src
+      (goto-char (point-min))
+      (should-not (re-search-forward "Beta" nil t)))))
+
+;;; Priority sorting
+
+(ert-deftest sk-test-priority-sort ()
+  "When priority sorting is enabled, cards appear in priority order."
+  (let ((simply-kanban-sort-by-priority t))
+    (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO [#C] Low\n* TODO [#A] High\n* TODO [#B] Medium\n"
+      (goto-char (point-min))
+      (simply-kanban-next-card)
+      (let* ((anchors (simply-kanban--anchors))
+             (first-marker (get-text-property (caar anchors) 'simply-kanban-marker)))
+        (with-current-buffer (marker-buffer first-marker)
+          (goto-char first-marker)
+          (should (string-match-p "High" (org-get-heading t t t t))))))))
+
+;;; Jump to other window
+
+(ert-deftest sk-test-jump-other-window ()
+  "Jumping to source in another window runs without error."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (simply-kanban-jump-other-window)
+    t))
 
 (provide 'simply-kanban-tests)
 ;;; simply-kanban-tests.el ends here
