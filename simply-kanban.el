@@ -35,11 +35,13 @@
 ;;   } / S-right    advance card to the next stage
 ;;   { / S-left     send card back a stage
 ;;   s              set status (choose any stage)
-;;   RET            jump to the heading in the Org buffer
+;;   RET            reveal the heading (focus stays on the board)
 ;;   v              jump to the heading in another window
 ;;   k              delete the heading (with confirmation)
 ;;   t              filter board by tag
 ;;   T              clear tag filter
+;;   e              toggle the body of the card at point
+;;   E              toggle the body of every card
 ;;   F              toggle follow mode
 ;;   g              refresh
 ;;   q              quit
@@ -50,6 +52,7 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
+(require 'pulse)
 
 ;;; Customization
 
@@ -90,8 +93,19 @@ Columns otherwise expand to fill the board window, divided evenly."
   :group 'simply-kanban)
 
 (defface simply-kanban-current-card
-  '((t :inherit highlight :weight bold))
+  '((t :weight bold))
   "Face used to highlight the card at point."
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-pulse-on-goto t
+  "When non-nil, briefly pulse the Org heading when revealing it from the board.
+Applies both to \\[simply-kanban-goto] and to follow mode."
+  :type 'boolean
+  :group 'simply-kanban)
+
+(defface simply-kanban-flash
+  '((t :inherit highlight))
+  "Face used to briefly pulse a heading when jumping to it from the board."
   :group 'simply-kanban)
 
 (defun simply-kanban--keyword-face (keyword)
@@ -124,6 +138,9 @@ buffers on every render so the board can pick up new files.")
 (defvar-local simply-kanban--tag-filter nil
   "When non-nil, only show cards carrying this tag.")
 
+(defvar-local simply-kanban--expanded-cards nil
+  "Markers of cards whose Org body is currently shown on the board.")
+
 (defvar simply-kanban--multi-source nil
   "Bound non-nil while rendering a board that spans more than one file.
 When set, cards show their source file so they can be told apart.")
@@ -136,9 +153,24 @@ When set, cards show their source file so they can be told apart.")
     (or (and (boundp 'org-todo-keywords-1) org-todo-keywords-1)
         '("TODO" "DONE"))))
 
+(defun simply-kanban--entry-body ()
+  "Return the body text of the Org entry at point, or nil when empty.
+Excludes the heading, its planning line, and any property/logbook drawer;
+text belonging to child headings is not included."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((end (save-excursion (outline-next-heading) (point))))
+      (org-end-of-meta-data t)
+      ;; For an empty entry `org-end-of-meta-data' can land on the next
+      ;; heading; clamp so its text is never swept into the body.
+      (let ((beg (min (point) end)))
+        (when (< beg end)
+          (let ((body (string-trim (buffer-substring-no-properties beg end))))
+            (unless (string-empty-p body) body)))))))
+
 (defun simply-kanban--collect-tasks (buffer)
   "Collect TODO entries from Org BUFFER as a list of card plists.
-Each plist has :keyword :title :priority :tags :file :marker."
+Each plist has :keyword :title :body :priority :tags :file :marker."
   (with-current-buffer buffer
     (let ((file (if (buffer-file-name)
                     (file-name-nondirectory (buffer-file-name))
@@ -151,7 +183,9 @@ Each plist has :keyword :title :priority :tags :file :marker."
               (when kw
                 (let ((comps (org-heading-components)))
                   (push (list :keyword kw
-                              :title (or (org-get-heading t t t t) "")
+                              :title (substring-no-properties
+                                      (or (org-get-heading t t t t) ""))
+                              :body (simply-kanban--entry-body)
                               :priority (nth 3 comps)
                               :tags (org-get-tags nil t)
                               :file file
@@ -203,8 +237,23 @@ buffer (or buffers sharing a workflow) the natural order is kept."
         (fill-region (point-min) (point-max)))
       (split-string (buffer-string) "\n"))))
 
+(defun simply-kanban--same-card-p (m1 m2)
+  "Non-nil when markers M1 and M2 point at the same heading."
+  (and (markerp m1) (markerp m2)
+       (marker-buffer m1) (marker-buffer m2)
+       (eq (marker-buffer m1) (marker-buffer m2))
+       (= (marker-position m1) (marker-position m2))))
+
+(defun simply-kanban--card-expanded-p (marker)
+  "Non-nil when the card identified by MARKER should show its body."
+  (and marker
+       (seq-some (lambda (m) (simply-kanban--same-card-p m marker))
+                 simply-kanban--expanded-cards)))
+
 (defun simply-kanban--format-card (task width)
-  "Return card lines for TASK fitting WIDTH, with a metadata/content split."
+  "Return card lines for TASK fitting WIDTH, with a metadata/content split.
+When the card is expanded (see `simply-kanban--expanded-cards'), its Org
+body is appended below the title."
   (let* ((inner (max 1 (- width 4)))
          (keyword (plist-get task :keyword))
          (border-face (simply-kanban--keyword-face keyword))
@@ -222,30 +271,34 @@ buffer (or buffers sharing a workflow) the natural order is kept."
                       "0"))
          (loc-str (format "%s:%s" file line-num))
          (title-lines (simply-kanban--wrap (plist-get task :title) inner))
+         (body (and (simply-kanban--card-expanded-p marker)
+                    (plist-get task :body)))
          (box (lambda (s)
                 (concat (propertize "│" 'face border-face)
                         " "
                         (simply-kanban--pad s inner)
                         " "
                         (propertize "│" 'face border-face))))
+         (rule (lambda (l r)
+                 (concat (propertize l 'face border-face)
+                         (propertize (make-string (- width 2) ?─) 'face border-face)
+                         (propertize r 'face border-face))))
          lines)
-    (push (concat (propertize "┌" 'face border-face)
-                  (propertize (make-string (- width 2) ?─) 'face border-face)
-                  (propertize "┐" 'face border-face))
-          lines)
+    (push (funcall rule "┌" "┐") lines)
     (push (funcall box prio-str) lines)
     (push (funcall box loc-str) lines)
     (push (funcall box "james dyer") lines)
-    (push (concat (propertize "├" 'face border-face)
-                  (propertize (make-string (- width 2) ?─) 'face border-face)
-                  (propertize "┤" 'face border-face))
-          lines)
+    (push (funcall rule "├" "┤") lines)
     (dolist (tl title-lines)
       (push (funcall box tl) lines))
-    (push (concat (propertize "└" 'face border-face)
-                  (propertize (make-string (- width 2) ?─) 'face border-face)
-                  (propertize "┘" 'face border-face))
-          lines)
+    (when body
+      (push (funcall rule "├" "┤") lines)
+      (dolist (raw (split-string body "\n"))
+        (if (string-empty-p raw)
+            (push (funcall box "") lines)
+          (dolist (bl (simply-kanban--wrap raw inner))
+            (push (funcall box bl) lines)))))
+    (push (funcall rule "└" "┘") lines)
     (nreverse lines)))
 
 (defun simply-kanban--priority-order (prio)
@@ -276,9 +329,11 @@ Each returned string is exactly WIDTH columns wide."
          (divider (propertize (make-string width ?─)
                               'face 'shadow
                               'simply-kanban-keyword keyword))
-         (cells (list (simply-kanban--pad header width)
+         ;; Built bottom-up: the whole list is `nreverse'd below, so these
+         ;; sit reversed here to render as header, divider, then a blank gap.
+         (cells (list (simply-kanban--pad "" width)
                       divider
-                      (simply-kanban--pad "" width))))
+                      (simply-kanban--pad header width))))
     (dolist (task col-tasks)
       (let ((marker (plist-get task :marker))
             (first t))
@@ -466,17 +521,32 @@ Keeps the current row where possible."
 
 ;;; Actions
 
+(defun simply-kanban--flash-heading ()
+  "Briefly pulse the Org heading line at point as a visual cue.
+Does nothing when `simply-kanban-pulse-on-goto' is nil.  Pulsing uses an
+overlay, so it animates regardless of which window has focus."
+  (when simply-kanban-pulse-on-goto
+    (let ((pulse-flag t))
+      (pulse-momentary-highlight-one-line (point) 'simply-kanban-flash))))
+
 (defun simply-kanban-goto ()
-  "Jump to the Org heading for the card at point."
+  "Reveal the Org heading for the card at point without leaving the board.
+The heading's file is shown in another window and the heading line is briefly
+pulsed; focus stays in the board."
   (interactive)
   (let ((marker (simply-kanban--marker-at-point)))
     (if (not (and marker (marker-buffer marker)))
         (message "Point is not on a card")
-      (pop-to-buffer (marker-buffer marker))
-      (goto-char marker)
-      (org-back-to-heading t)
-      (cond ((fboundp 'org-fold-show-entry) (org-fold-show-entry))
-            ((fboundp 'org-show-entry) (org-show-entry))))))
+      (let* ((buf (marker-buffer marker))
+             (win (display-buffer buf '(nil (inhibit-same-window . t)))))
+        (when (window-live-p win)
+          (with-selected-window win
+            (goto-char marker)
+            (org-back-to-heading t)
+            (cond ((fboundp 'org-fold-show-entry) (org-fold-show-entry))
+                  ((fboundp 'org-show-entry) (org-show-entry)))
+            (recenter)
+            (simply-kanban--flash-heading)))))))
 
 (defun simply-kanban--set-state (marker keyword)
   "Set the TODO state of the heading at MARKER to KEYWORD.
@@ -638,15 +708,7 @@ Installed buffer-locally on the board buffer's `kill-buffer-hook'."
         (unless (seq-some (lambda (buf) (not (eq buf this)))
                           (simply-kanban--boards-for source))
           (with-current-buffer source
-            (remove-hook 'after-save-hook #'simply-kanban--after-source-save t)))))
-    (unless (seq-some (lambda (buf)
-                        (and (not (eq buf this))
-                             (buffer-live-p buf)
-                             (with-current-buffer buf
-                               (derived-mode-p 'simply-kanban-mode))))
-                      (buffer-list))
-      (remove-hook 'window-size-change-functions
-                   #'simply-kanban--on-window-resize))))
+            (remove-hook 'after-save-hook #'simply-kanban--after-source-save t)))))))
 
 (defun simply-kanban--install-hooks (board sources)
   "Wire up auto-refresh between BOARD and its SOURCES (a list of buffers)."
@@ -672,7 +734,8 @@ Installed buffer-locally on the board buffer's `kill-buffer-hook'."
                 (org-back-to-heading t)
                 (cond ((fboundp 'org-fold-show-entry) (org-fold-show-entry))
                       ((fboundp 'org-show-entry) (org-show-entry)))
-                (recenter)))))))))
+                (recenter)
+                (simply-kanban--flash-heading)))))))))
 
 (defun simply-kanban-toggle-follow ()
   "Toggle follow mode for the board.
@@ -681,6 +744,32 @@ When enabled, navigating between cards also reveals the heading in its file."
   (setq simply-kanban--follow (not simply-kanban--follow))
   (message "Follow mode %s" (if simply-kanban--follow "enabled" "disabled"))
   (when simply-kanban--follow (simply-kanban--follow-card)))
+
+(defun simply-kanban-toggle-expand ()
+  "Toggle showing the Org body of the card at point."
+  (interactive)
+  (let ((marker (simply-kanban--marker-at-point)))
+    (unless marker
+      (user-error "Point is not on a card"))
+    (if (simply-kanban--card-expanded-p marker)
+        (setq simply-kanban--expanded-cards
+              (cl-remove-if (lambda (m) (simply-kanban--same-card-p m marker))
+                            simply-kanban--expanded-cards))
+      (push (copy-marker marker) simply-kanban--expanded-cards))
+    (simply-kanban-refresh)))
+
+(defun simply-kanban-toggle-expand-all ()
+  "Expand the body of every card, or collapse them all if any are expanded."
+  (interactive)
+  (unless (derived-mode-p 'simply-kanban-mode)
+    (user-error "Not in a kanban board"))
+  (setq simply-kanban--expanded-cards
+        (unless simply-kanban--expanded-cards
+          (delq nil (mapcar (lambda (tk) (plist-get tk :marker))
+                            (simply-kanban--collect-all
+                             (simply-kanban--spec-buffers
+                              simply-kanban--source-spec))))))
+  (simply-kanban-refresh))
 
 (defun simply-kanban--highlight-card ()
   "Bold every region of the card at point, clearing any previous highlight.
@@ -727,6 +816,8 @@ that share the same `simply-kanban-marker' text property."
     (define-key map (kbd "t") #'simply-kanban-set-tag-filter)
     (define-key map (kbd "T") #'simply-kanban-clear-tag-filter)
     (define-key map (kbd "F") #'simply-kanban-toggle-follow)
+    (define-key map (kbd "e") #'simply-kanban-toggle-expand)
+    (define-key map (kbd "E") #'simply-kanban-toggle-expand-all)
     (define-key map (kbd "g") #'simply-kanban-refresh)
     (define-key map (kbd "q") #'quit-window)
     map)
@@ -740,20 +831,6 @@ that share the same `simply-kanban-marker' text property."
     (`(files . ,files)
      (propertize (format "agenda (%d)" (length files)) 'face 'success))
     (_ (propertize "—" 'face 'shadow))))
-
-(defun simply-kanban--on-window-resize (frame)
-  "Refit any visible kanban boards in FRAME after a window resize."
-  (let ((buffers-to-refresh nil))
-    (walk-windows
-     (lambda (win)
-       (let ((buf (window-buffer win)))
-         (with-current-buffer buf
-           (when (derived-mode-p 'simply-kanban-mode)
-             (push buf buffers-to-refresh)))))
-     nil frame)
-    (dolist (buf (delete-dups buffers-to-refresh))
-      (with-current-buffer buf
-        (simply-kanban-refresh)))))
 
 (define-derived-mode simply-kanban-mode special-mode "Kanban"
   "Major mode for the Org-linked kanban board.
@@ -776,6 +853,7 @@ that share the same `simply-kanban-marker' text property."
           (:eval (propertize "t/T" 'face 'help-key-binding)) " tag  "
           (:eval (propertize "n/p" 'face 'help-key-binding)) " card  "
           (:eval (propertize "TAB" 'face 'help-key-binding)) " column  "
+          (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
           (:eval (propertize "F" 'face 'help-key-binding)) " follow"
           (:eval (if simply-kanban--follow
                      (propertize "[ON]" 'face 'success)
@@ -783,8 +861,7 @@ that share the same `simply-kanban-marker' text property."
           "  "
           (:eval (propertize "g" 'face 'help-key-binding)) " refresh  "
           (:eval (propertize "q" 'face 'help-key-binding)) " quit"))
-  (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t)
-  (add-hook 'window-size-change-functions #'simply-kanban--on-window-resize))
+  (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t))
 
 (defun simply-kanban--open (spec)
   "Build and display a kanban board for SPEC.
