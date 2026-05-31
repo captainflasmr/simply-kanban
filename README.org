@@ -78,6 +78,8 @@ A single Org file can hold several boards.  Make each board a *level-1 heading w
 
 =M-x simply-kanban= then prompts for which board to open, and =B= switches between them.  Any *loose* level-1 TODO headings sitting at the top of the file (outside a board heading) are still offered as a flat board named by =simply-kanban-toplevel-name= ("Top Level" by default).  A plain file whose top-level headings are themselves TODO items continues to open as a single flat board, exactly as before.
 
+When a file holds more than one board the chooser (and =B=) also offers an *All Boards* entry that aggregates every board into one view — the file's TODO keywords become the columns and each card denotes its board (=▸ Project Alpha=), in the same spirit as the source-file marker (=» file=) on an aggregated agenda board.  Moving a card still changes only its TODO state, so it stays in its own board.  This entry is controlled by =simply-kanban-all-boards= (default =t=) and named by =simply-kanban-all-boards-name=.
+
 Status changes and deletions are written straight back to the source file and, by default, saved (see =simply-kanban-save-after-change=).
 
 * Customisation
@@ -91,6 +93,8 @@ Status changes and deletions are written straight back to the source file and, b
 - =simply-kanban-save-after-change= (default =t=) — save the source Org buffer after a status change or deletion.
 - =simply-kanban-pulse-on-goto= (default =t=) — briefly pulse the target heading line when revealing it (=RET= and follow mode).
 - =simply-kanban-toplevel-name= (default ="Top Level"=) — name of the flat board holding a multi-board file's loose level-1 TODO headings.
+- =simply-kanban-all-boards= (default =t=) — in a multi-board file, offer an aggregate board (in the chooser and =B=) showing every board's cards at once, each card denoting its board.
+- =simply-kanban-all-boards-name= (default ="All Boards"=) — name of that aggregate entry.
 
 Faces: =simply-kanban-current-card= (focused card), =simply-kanban-tag= (card tags), =simply-kanban-effort= (effort badge and column total), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
 

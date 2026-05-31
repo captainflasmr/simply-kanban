@@ -122,6 +122,21 @@ inside a container."
   :type 'string
   :group 'simply-kanban)
 
+(defcustom simply-kanban-all-boards t
+  "When non-nil, the board chooser offers an aggregate of every board in a file.
+In a multi-board Org file, `simply-kanban' and \\[simply-kanban-switch-board]
+then include an extra entry (named by `simply-kanban-all-boards-name') showing
+the cards from all the file's boards at once, each card denoting which board it
+belongs to."
+  :type 'boolean
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-all-boards-name "All Boards"
+  "Name of the synthetic board aggregating every board in a multi-board file.
+Offered in the board chooser when `simply-kanban-all-boards' is non-nil."
+  :type 'string
+  :group 'simply-kanban)
+
 (defface simply-kanban-column-header
   '((t :weight bold :inherit org-document-title))
   "Face for kanban column headers."
@@ -196,6 +211,10 @@ new files.")
   "Bound non-nil while rendering a board that spans more than one file.
 When set, cards show their source file so they can be told apart.")
 
+(defvar simply-kanban--show-board nil
+  "Bound non-nil while rendering an aggregate of every board in one file.
+When set, cards show which board they belong to (their `:board' field).")
+
 ;;; Data collection
 
 (defun simply-kanban--source-keywords (buffer)
@@ -221,7 +240,8 @@ text belonging to child headings is not included."
 
 (defun simply-kanban--collect-tasks (buffer &optional restrict)
   "Collect TODO entries from Org BUFFER as a list of card plists.
-Each plist has :keyword :title :body :priority :tags :file :marker.
+Each plist has :keyword :title :body :priority :tags :effort :file :board
+:marker.  :board is filled in only by `simply-kanban--collect-boards'.
 RESTRICT limits which entries become cards:
   nil          -- every TODO heading in the buffer;
   a marker     -- only TODO headings in that heading's subtree;
@@ -247,6 +267,7 @@ RESTRICT limits which entries become cards:
                                   :tags (org-get-tags nil t)
                                   :effort (org-entry-get nil "Effort")
                                   :file file
+                                  :board nil
                                   :marker (point-marker))
                             tasks)))))))
          (if (markerp restrict)
@@ -323,6 +344,37 @@ plain flat file, signalling the caller to use the whole-buffer board."
        (mapcar (lambda (b) (cons (car b) (list 'board buffer (cdr b))))
                containers)))))
 
+(defun simply-kanban--file-boards-with-all (buffer)
+  "Like `simply-kanban--file-boards', plus an \"all boards\" aggregate entry.
+When BUFFER defines more than one board and `simply-kanban-all-boards' is
+non-nil, the returned list is prefixed with a (NAME . (all-boards . BUFFER))
+entry named by `simply-kanban-all-boards-name'.  Otherwise it is identical to
+`simply-kanban--file-boards'."
+  (let ((boards (simply-kanban--file-boards buffer)))
+    (if (and boards (cdr boards) simply-kanban-all-boards)
+        (cons (cons simply-kanban-all-boards-name (cons 'all-boards buffer))
+              boards)
+      boards)))
+
+(defun simply-kanban--collect-boards (buffer)
+  "Collect tasks from every board in BUFFER, tagging each card with its :board.
+The board name is the container heading's text (or `simply-kanban-toplevel-name'
+for the loose top-level cards), set on each card's :board field so the render
+can denote it."
+  (let (result)
+    (dolist (entry (simply-kanban--file-boards buffer))
+      (let* ((name (car entry))
+             (tasks (pcase (cdr entry)
+                      (`(board ,buf ,marker)
+                       (and (buffer-live-p buf)
+                            (simply-kanban--collect-tasks buf marker)))
+                      (`(toplevel . ,buf)
+                       (and (buffer-live-p buf)
+                            (simply-kanban--collect-tasks buf 'toplevel))))))
+        (dolist (task tasks)
+          (push (plist-put task :board name) result))))
+    (nreverse result)))
+
 (defun simply-kanban--read-spec (boards)
   "Prompt for one of BOARDS (a list of (NAME . SPEC)) and return that pair."
   (let* ((names (mapcar #'car boards))
@@ -335,6 +387,7 @@ plain flat file, signalling the caller to use the whole-buffer board."
     (`(buffer . ,buffer) (and (buffer-live-p buffer) (list buffer)))
     (`(board ,buffer ,_marker) (and (buffer-live-p buffer) (list buffer)))
     (`(toplevel . ,buffer) (and (buffer-live-p buffer) (list buffer)))
+    (`(all-boards . ,buffer) (and (buffer-live-p buffer) (list buffer)))
     (`(files . ,files)
      (delq nil (mapcar (lambda (f)
                          (when (and f (file-exists-p f))
@@ -412,9 +465,10 @@ Returns nil when EFFORT is empty or cannot be parsed."
 (defun simply-kanban--format-card (task width)
   "Return compact card lines for TASK fitting WIDTH.
 A card shows its title prefixed by a priority cookie when one is set, then
-its tags (when any), and -- in an aggregated board -- its source file.  When
-the card is expanded (see `simply-kanban--expanded-cards') the Org body
-follows below a divider."
+its tags (when any), its effort estimate, and -- in an aggregated board --
+its board (when showing all boards in a file) or source file.  When the card
+is expanded (see `simply-kanban--expanded-cards') the Org body follows below
+a divider."
   (let* ((inner (max 1 (- width 4)))
          (keyword (plist-get task :keyword))
          (border-face (simply-kanban--keyword-face keyword))
@@ -434,6 +488,9 @@ follows below a divider."
          (effort-line (when (and effort (not (string-empty-p effort)))
                         (propertize (concat "Effort: " effort)
                                     'face 'simply-kanban-effort)))
+         (board-line (when simply-kanban--show-board
+                       (let ((b (plist-get task :board)))
+                         (when b (propertize (concat "▸ " b) 'face 'shadow)))))
          (file-line (when simply-kanban--multi-source
                       (propertize (concat "» " (or (plist-get task :file) "org"))
                                   'face 'shadow)))
@@ -457,6 +514,8 @@ follows below a divider."
       (push (funcall box tline) lines))
     (when effort-line
       (push (funcall box effort-line) lines))
+    (when board-line
+      (push (funcall box board-line) lines))
     (when file-line
       (push (funcall box file-line) lines))
     (when body
@@ -542,6 +601,7 @@ Must be called with the board buffer current and its window selected."
   (let* ((inhibit-read-only t)
          (buffers (simply-kanban--spec-buffers spec))
          (simply-kanban--multi-source (> (length buffers) 1))
+         (simply-kanban--show-board (eq (car-safe spec) 'all-boards))
          (tasks (pcase spec
                   (`(board ,buf ,marker)
                    (and (buffer-live-p buf)
@@ -549,6 +609,9 @@ Must be called with the board buffer current and its window selected."
                   (`(toplevel . ,buf)
                    (and (buffer-live-p buf)
                         (simply-kanban--collect-tasks buf 'toplevel)))
+                  (`(all-boards . ,buf)
+                   (and (buffer-live-p buf)
+                        (simply-kanban--collect-boards buf)))
                   (_ (simply-kanban--collect-all buffers))))
          (tasks (if simply-kanban--tag-filter
                     (cl-remove-if-not
@@ -1078,6 +1141,10 @@ Uses the plain header-line foreground so it reads well on any theme."
      (format "%s ▸ %s"
              (if (buffer-live-p buf) (buffer-name buf) "?")
              simply-kanban-toplevel-name))
+    (`(all-boards . ,buf)
+     (format "%s ▸ %s"
+             (if (buffer-live-p buf) (buffer-name buf) "?")
+             simply-kanban-all-boards-name))
     (`(files . ,files)
      (format "agenda (%d)" (length files)))
     (_ "—")))
@@ -1171,7 +1238,7 @@ them."
   (interactive)
   (unless (derived-mode-p 'org-mode)
     (user-error "Not in an Org buffer"))
-  (let ((boards (simply-kanban--file-boards (current-buffer))))
+  (let ((boards (simply-kanban--file-boards-with-all (current-buffer))))
     (if boards
         (let ((choice (if (cdr boards)
                           (simply-kanban--read-spec boards)
@@ -1186,12 +1253,13 @@ Only available when the current board came from a multi-board file."
   (interactive)
   (let ((buf (pcase simply-kanban--source-spec
                (`(board ,b ,_) b)
-               (`(toplevel . ,b) b))))
+               (`(toplevel . ,b) b)
+               (`(all-boards . ,b) b))))
     (unless buf
       (user-error "Not a multi-board kanban"))
     (unless (buffer-live-p buf)
       (user-error "Source Org buffer is gone"))
-    (let ((boards (simply-kanban--file-boards buf)))
+    (let ((boards (simply-kanban--file-boards-with-all buf)))
       (unless boards
         (user-error "No boards found in %s" (buffer-name buf)))
       (let ((choice (simply-kanban--read-spec boards)))

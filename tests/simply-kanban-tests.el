@@ -109,6 +109,50 @@
     (should (cl-some (lambda (l) (string-match-p "1:00" l)) with))
     (should-not (cl-some (lambda (l) (string-match-p "1:00" l)) without))))
 
+(ert-deftest sk-test-collect-boards ()
+  "`--collect-boards' gathers every board's cards, tagging each with its :board."
+  (sk-test-with-org (concat "* Project Alpha\n** TODO design\n** TODO build\n"
+                            "* Project Beta\n** TODO research\n")
+    (let* ((tasks (simply-kanban--collect-boards src))
+           (boards (mapcar (lambda (tk) (plist-get tk :board)) tasks)))
+      (should (= 3 (length tasks)))
+      (should (member "Project Alpha" boards))
+      (should (member "Project Beta" boards))
+      ;; the design card belongs to Alpha
+      (let ((design (seq-find (lambda (tk) (string= (plist-get tk :title) "design"))
+                              tasks)))
+        (should (string= (plist-get design :board) "Project Alpha"))))))
+
+(ert-deftest sk-test-file-boards-with-all ()
+  "`--file-boards-with-all' prepends an all-boards entry for multi-board files."
+  (sk-test-with-org (concat "* Project Alpha\n** TODO design\n"
+                            "* Project Beta\n** TODO research\n")
+    (let ((boards (simply-kanban--file-boards-with-all src)))
+      (should (assoc simply-kanban-all-boards-name boards))
+      (should (equal (cdr (assoc simply-kanban-all-boards-name boards))
+                     (cons 'all-boards src)))
+      ;; the real boards are still present after the aggregate entry
+      (should (assoc "Project Alpha" boards))
+      (should (assoc "Project Beta" boards)))))
+
+(ert-deftest sk-test-file-boards-with-all-single ()
+  "A single-board file gets no all-boards entry."
+  (sk-test-with-org "* Project Alpha\n** TODO design\n"
+    (let ((boards (simply-kanban--file-boards-with-all src)))
+      (should-not (assoc simply-kanban-all-boards-name boards)))))
+
+(ert-deftest sk-test-format-card-shows-board ()
+  "When showing all boards, a card renders its board name."
+  (let ((simply-kanban--show-board t))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :board "Project Alpha") 24)))
+      (should (cl-some (lambda (l) (string-match-p "Project Alpha" l)) lines))))
+  ;; ...and not when the flag is off
+  (let ((simply-kanban--show-board nil))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :board "Project Alpha") 24)))
+      (should-not (cl-some (lambda (l) (string-match-p "Project Alpha" l)) lines)))))
+
 ;;; Rendering / navigation
 
 (defmacro sk-test-with-board (content &rest body)
@@ -128,6 +172,22 @@ BODY runs with `board' current."
   "The board has one card anchor per task."
   (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO a\n* TODO b\n* DONE c\n"
     (should (= 3 (length (simply-kanban--anchors))))))
+
+(ert-deftest sk-test-all-boards-render ()
+  "Rendering an all-boards spec shows every board's cards, denoting the board."
+  (sk-test-with-org (concat "* Project Alpha\n** TODO design\n** TODO build\n"
+                            "* Project Beta\n** TODO research\n")
+    (let ((board (get-buffer-create "*sk-test-board*")))
+      (unwind-protect
+          (with-current-buffer board
+            (simply-kanban-mode)
+            (simply-kanban--render (cons 'all-boards src))
+            (should (= 3 (length (simply-kanban--anchors))))
+            (goto-char (point-min))
+            (should (re-search-forward "Project Alpha" nil t))
+            (goto-char (point-min))
+            (should (re-search-forward "Project Beta" nil t)))
+        (kill-buffer board)))))
 
 (ert-deftest sk-test-navigation ()
   "Next/previous card move forward and back through anchors."
