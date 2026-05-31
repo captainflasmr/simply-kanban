@@ -48,6 +48,7 @@
 ;;   t              filter board by tag
 ;;   T              clear tag filter
 ;;   :              set the Org tags on the card at point
+;;   ,              set the Org priority of the card at point
 ;;   e              toggle the body of the card at point
 ;;   E              toggle the body of every card
 ;;   F              toggle follow mode
@@ -118,6 +119,11 @@ inside a container."
 (defface simply-kanban-current-card
   '((t :weight bold))
   "Face used to highlight the card at point."
+  :group 'simply-kanban)
+
+(defface simply-kanban-header-line
+  '((t :foreground "white" :background "#2257a0" :weight bold))
+  "Face for the board's top header-line, giving it a plain, bold fg/bg bar."
   :group 'simply-kanban)
 
 (defface simply-kanban-tag
@@ -371,30 +377,29 @@ buffer (or buffers sharing a workflow) the natural order is kept."
                  simply-kanban--expanded-cards)))
 
 (defun simply-kanban--format-card (task width)
-  "Return card lines for TASK fitting WIDTH, with a metadata/content split.
-When the card is expanded (see `simply-kanban--expanded-cards'), its Org
-body is appended below the title."
+  "Return compact card lines for TASK fitting WIDTH.
+A card shows its title prefixed by a priority cookie when one is set, then
+its tags (when any), and -- in an aggregated board -- its source file.  When
+the card is expanded (see `simply-kanban--expanded-cards') the Org body
+follows below a divider."
   (let* ((inner (max 1 (- width 4)))
          (keyword (plist-get task :keyword))
          (border-face (simply-kanban--keyword-face keyword))
          (prio (plist-get task :priority))
-         (prio-str (pcase prio
-                     (?A "[HIGH]")
-                     (?B "[NORMAL]")
-                     (?C "[LOW]")
-                     (_ "[NORMAL]")))
-         (file (or (plist-get task :file) "org"))
+         (prio-cookie (pcase prio (?A "[#A]") (?B "[#B]") (?C "[#C]") (_ nil)))
+         (title (or (plist-get task :title) ""))
+         (title-text (if prio-cookie (concat prio-cookie " " title) title))
+         (title-lines (simply-kanban--wrap title-text inner))
          (marker (plist-get task :marker))
-         (line-num (if (and marker (marker-position marker) (marker-buffer marker))
-                        (with-current-buffer (marker-buffer marker)
-                          (line-number-at-pos (marker-position marker)))
-                      "0"))
-         (loc-str (format "%s:%s" file line-num))
-         (title-lines (simply-kanban--wrap (plist-get task :title) inner))
          (tags (plist-get task :tags))
-         (tags-str (when tags
-                     (propertize (concat ":" (mapconcat #'identity tags ":") ":")
-                                 'face 'simply-kanban-tag)))
+         (tags-lines (when tags
+                       (simply-kanban--wrap
+                        (propertize (concat ":" (mapconcat #'identity tags ":") ":")
+                                    'face 'simply-kanban-tag)
+                        inner)))
+         (file-line (when simply-kanban--multi-source
+                      (propertize (concat "» " (or (plist-get task :file) "org"))
+                                  'face 'shadow)))
          (body (and (simply-kanban--card-expanded-p marker)
                     (plist-get task :body)))
          (box (lambda (s)
@@ -409,15 +414,12 @@ body is appended below the title."
                          (propertize r 'face border-face))))
          lines)
     (push (funcall rule "┌" "┐") lines)
-    (push (funcall box prio-str) lines)
-    (push (funcall box loc-str) lines)
-    (push (funcall box "james dyer") lines)
-    (push (funcall rule "├" "┤") lines)
     (dolist (tl title-lines)
       (push (funcall box tl) lines))
-    (when tags-str
-      (dolist (tline (simply-kanban--wrap tags-str inner))
-        (push (funcall box tline) lines)))
+    (dolist (tline tags-lines)
+      (push (funcall box tline) lines))
+    (when file-line
+      (push (funcall box file-line) lines))
     (when body
       (push (funcall rule "├" "┤") lines)
       (dolist (raw (split-string body "\n"))
@@ -470,8 +472,7 @@ Each returned string is exactly WIDTH columns wide."
                                (when first
                                  (list 'simply-kanban-card-anchor marker)))))
             (push (apply #'propertize (simply-kanban--pad line width) props) cells))
-          (setq first nil)))
-      (push (simply-kanban--pad "" width) cells))
+          (setq first nil))))
     (nreverse cells)))
 
 (defun simply-kanban--available-width ()
@@ -774,6 +775,21 @@ Candidates are the keywords of the card's own Org file."
       (simply-kanban-refresh)
       (simply-kanban--goto-marker marker))))
 
+(defun simply-kanban-set-priority ()
+  "Set the Org priority of the card at point using Org's native prompt."
+  (interactive)
+  (let ((marker (simply-kanban--marker-at-point)))
+    (if (not (and marker (buffer-live-p (marker-buffer marker))))
+        (message "Point is not on a card")
+      (with-current-buffer (marker-buffer marker)
+        (org-with-wide-buffer
+         (goto-char marker)
+         (org-back-to-heading t)
+         (call-interactively #'org-priority)))
+      (simply-kanban--maybe-save (marker-buffer marker))
+      (simply-kanban-refresh)
+      (simply-kanban--goto-marker marker))))
+
 (defun simply-kanban-set-tag-filter ()
   "Filter the board to show only cards with a given tag."
   (interactive)
@@ -977,6 +993,7 @@ that share the same `simply-kanban-marker' text property."
     (define-key map (kbd "t") #'simply-kanban-set-tag-filter)
     (define-key map (kbd "T") #'simply-kanban-clear-tag-filter)
     (define-key map (kbd ":") #'simply-kanban-set-tags)
+    (define-key map (kbd ",") #'simply-kanban-set-priority)
     (define-key map (kbd "F") #'simply-kanban-toggle-follow)
     (define-key map (kbd "e") #'simply-kanban-toggle-expand)
     (define-key map (kbd "E") #'simply-kanban-toggle-expand-all)
@@ -1011,6 +1028,8 @@ that share the same `simply-kanban-marker' text property."
 \\{simply-kanban-mode-map}"
   (setq-local truncate-lines t)
   (setq-local cursor-type 'box)
+  ;; Give the board's header-line a plain, bold fg/bg bar so it stands out.
+  (face-remap-set-base 'header-line 'simply-kanban-header-line)
   (setq header-line-format
         '(" Kanban  "
           (:eval (simply-kanban--header-source))
@@ -1025,6 +1044,7 @@ that share the same `simply-kanban-marker' text property."
           (:eval (propertize "k" 'face 'help-key-binding)) " delete  "
           (:eval (propertize "t/T" 'face 'help-key-binding)) " filter  "
           (:eval (propertize ":" 'face 'help-key-binding)) " tags  "
+          (:eval (propertize "," 'face 'help-key-binding)) " prio  "
           (:eval (propertize "n/p" 'face 'help-key-binding)) " card  "
           (:eval (propertize "TAB" 'face 'help-key-binding)) " column  "
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "

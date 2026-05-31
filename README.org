@@ -46,6 +46,7 @@ A header-line shows the source and the key reminders.  Columns expand to fill th
 | =t=       | filter board by tag                                  |
 | =T=       | clear tag filter                                     |
 | =:=       | set the Org tags on the card at point                |
+| =,=       | set the Org priority of the card at point            |
 | =e= / =E= | toggle the body of the card / every card             |
 | =F=       | toggle follow mode (show heading as you move)        |
 | =B=       | switch board (multi-board files only)                |
@@ -54,7 +55,7 @@ A header-line shows the source and the key reminders.  Columns expand to fill th
 
 The card at point is highlighted, and navigating moves the highlight onto the new card.
 
-Cards show their Org tags below the title, and =e= expands a card to show the heading's body text inline.  When you reveal a heading with =RET= (or while follow mode is on) the target heading line briefly pulses, and focus stays on the board.
+Cards are deliberately compact so you can fit many per window: a card shows its title (prefixed by a priority cookie such as =[#A]= only when one is set) and, when present, its tags.  In an aggregated board it also shows its source file (=» file=).  Press =e= to expand a card and show the heading's body text inline.  When you reveal a heading with =RET= (or while follow mode is on) the target heading line briefly pulses, and focus stays on the board.
 
 * Multiple boards in one file
 
@@ -84,7 +85,7 @@ Status changes and deletions are written straight back to the source file and, b
 - =simply-kanban-pulse-on-goto= (default =t=) — briefly pulse the target heading line when revealing it (=RET= and follow mode).
 - =simply-kanban-toplevel-name= (default ="Top Level"=) — name of the flat board holding a multi-board file's loose level-1 TODO headings.
 
-Faces: =simply-kanban-current-card= (focused card), =simply-kanban-tag= (card tags), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
+Faces: =simply-kanban-header-line= (the top header-line bar), =simply-kanban-current-card= (focused card), =simply-kanban-tag= (card tags), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
 
 * Development
 
