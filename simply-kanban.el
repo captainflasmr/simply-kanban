@@ -1,7 +1,7 @@
 ;;; simply-kanban.el --- Org-linked kanban board -*- lexical-binding: t; -*-
 
 ;; Author: James Dyer <captainflasmr@gmail.com>
-;; Version: 0.3.0
+;; Version: 0.4.0
 ;; Package-Requires: ((emacs "27.2"))
 ;; Keywords: outlines, convenience, tools, org
 ;; URL: https://github.com/captainflasmr/simply-kanban
@@ -28,6 +28,13 @@
 ;; The rendering and navigation are modelled on the kanban view in
 ;; `simply-annotate'.
 ;;
+;; A single Org file may also define several boards: make each board a
+;; level-1 heading (with no TODO keyword) and put its cards as TODO
+;; headings in that subtree.  `simply-kanban' then prompts for which board
+;; to open, and `B' switches between them.  Any loose level-1 TODO headings
+;; at the top of such a file are still offered as a flat board named by
+;; `simply-kanban-toplevel-name'.
+;;
 ;; Usage: open an Org file and M-x simply-kanban.
 ;;
 ;;   n / p          next / previous card
@@ -44,6 +51,7 @@
 ;;   e              toggle the body of the card at point
 ;;   E              toggle the body of every card
 ;;   F              toggle follow mode
+;;   B              switch board (multi-board files only)
 ;;   g              refresh
 ;;   q              quit
 
@@ -94,6 +102,14 @@ Edits include changing a card's status and deleting a heading."
   :type 'boolean
   :group 'simply-kanban)
 
+(defcustom simply-kanban-toplevel-name "Top Level"
+  "Name of the flat board holding a file's loose level-1 TODO headings.
+In a multi-board file (one with level-1 container headings), this board
+gathers the TODO headings that sit directly at the top level rather than
+inside a container."
+  :type 'string
+  :group 'simply-kanban)
+
 (defface simply-kanban-column-header
   '((t :weight bold :inherit org-document-title))
   "Face for kanban column headers."
@@ -130,9 +146,13 @@ Applies both to \\[simply-kanban-goto] and to follow mode."
 
 (defvar-local simply-kanban--source-spec nil
   "Descriptor of where this board's tasks come from.
-Either (buffer . BUFFER) for a single Org buffer, or (files . FILES)
-for a list of Org files (e.g. the agenda files).  Re-resolved to live
-buffers on every render so the board can pick up new files.")
+One of:
+  (buffer . BUFFER)        -- every TODO heading in a single Org buffer;
+  (board BUFFER MARKER)    -- the TODO headings in the subtree of the
+                              level-1 board heading at MARKER;
+  (files . FILES)          -- a list of Org files (e.g. the agenda files).
+Re-resolved to live buffers on every render so the board can pick up
+new files.")
 
 (defvar-local simply-kanban--source-buffers nil
   "The live Org buffers this board last aggregated, for hook management.")
@@ -182,35 +202,121 @@ text belonging to child headings is not included."
           (let ((body (string-trim (buffer-substring-no-properties beg end))))
             (unless (string-empty-p body) body)))))))
 
-(defun simply-kanban--collect-tasks (buffer)
+(defun simply-kanban--collect-tasks (buffer &optional restrict)
   "Collect TODO entries from Org BUFFER as a list of card plists.
-Each plist has :keyword :title :body :priority :tags :file :marker."
+Each plist has :keyword :title :body :priority :tags :file :marker.
+RESTRICT limits which entries become cards:
+  nil          -- every TODO heading in the buffer;
+  a marker     -- only TODO headings in that heading's subtree;
+  the symbol `toplevel' -- only the loose level-1 TODO headings."
   (with-current-buffer buffer
     (let ((file (if (buffer-file-name)
                     (file-name-nondirectory (buffer-file-name))
-                  (buffer-name))))
+                  (buffer-name)))
+          tasks)
       (org-with-wide-buffer
-       (let (tasks)
-         (org-map-entries
-          (lambda ()
-            (let ((kw (org-get-todo-state)))
-              (when kw
-                (let ((comps (org-heading-components)))
-                  (push (list :keyword kw
-                              :title (substring-no-properties
-                                      (or (org-get-heading t t t t) ""))
-                              :body (simply-kanban--entry-body)
-                              :priority (nth 3 comps)
-                              :tags (org-get-tags nil t)
-                              :file file
-                              :marker (point-marker))
-                        tasks))))))
-         (nreverse tasks))))))
+       (let ((collect
+              (lambda ()
+                (let ((kw (org-get-todo-state)))
+                  (when (and kw
+                             (or (not (eq restrict 'toplevel))
+                                 (= (org-current-level) 1)))
+                    (let ((comps (org-heading-components)))
+                      (push (list :keyword kw
+                                  :title (substring-no-properties
+                                          (or (org-get-heading t t t t) ""))
+                                  :body (simply-kanban--entry-body)
+                                  :priority (nth 3 comps)
+                                  :tags (org-get-tags nil t)
+                                  :file file
+                                  :marker (point-marker))
+                            tasks)))))))
+         (if (markerp restrict)
+             (progn
+               (goto-char restrict)
+               (org-map-entries collect nil 'tree))
+           (org-map-entries collect)))
+       (nreverse tasks)))))
+
+(defun simply-kanban--subtree-has-todo-p ()
+  "Non-nil if the subtree of the heading at point holds any TODO entry."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((end (save-excursion (org-end-of-subtree t t))))
+      (catch 'found
+        (while (re-search-forward org-heading-regexp end t)
+          (save-excursion
+            (goto-char (match-beginning 0))
+            (when (org-get-todo-state) (throw 'found t))))
+        nil))))
+
+(defun simply-kanban--scan-boards (buffer)
+  "Return ((NAME . MARKER) ...) for the kanban boards defined in BUFFER.
+A board is a level-1 heading without a TODO keyword whose subtree contains
+at least one TODO entry; its cards are those TODO entries.  Order follows
+the file.  When the buffer has no such headings the list is empty and the
+whole buffer is treated as a single flat board."
+  (with-current-buffer buffer
+    (org-with-wide-buffer
+     (goto-char (point-min))
+     (let (boards)
+       (while (re-search-forward "^\\*[ \t]" nil t)
+         (save-excursion
+           (beginning-of-line)
+           (when (and (null (org-get-todo-state))
+                      (simply-kanban--subtree-has-todo-p))
+             (push (cons (substring-no-properties
+                          (or (org-get-heading t t t t) ""))
+                         (point-marker))
+                   boards))))
+       (nreverse boards)))))
+
+(defun simply-kanban--board-name (marker)
+  "Return the heading text of the board at MARKER, or nil."
+  (when (and (markerp marker) (marker-buffer marker))
+    (with-current-buffer (marker-buffer marker)
+      (org-with-wide-buffer
+       (goto-char marker)
+       (substring-no-properties (or (org-get-heading t t t t) "?"))))))
+
+(defun simply-kanban--has-toplevel-todos-p (buffer)
+  "Non-nil if BUFFER has any level-1 heading carrying a TODO keyword."
+  (with-current-buffer buffer
+    (org-with-wide-buffer
+     (goto-char (point-min))
+     (catch 'yes
+       (while (re-search-forward "^\\*[ \t]" nil t)
+         (save-excursion
+           (beginning-of-line)
+           (when (org-get-todo-state) (throw 'yes t))))
+       nil))))
+
+(defun simply-kanban--file-boards (buffer)
+  "Return ((NAME . SPEC) ...) for every board selectable in BUFFER.
+When BUFFER has container headings (see `simply-kanban--scan-boards') the
+list holds one entry per container, preceded by a `simply-kanban-toplevel-name'
+entry for the loose level-1 TODO headings when any exist.  Returns nil for a
+plain flat file, signalling the caller to use the whole-buffer board."
+  (let ((containers (simply-kanban--scan-boards buffer)))
+    (when containers
+      (append
+       (when (simply-kanban--has-toplevel-todos-p buffer)
+         (list (cons simply-kanban-toplevel-name (cons 'toplevel buffer))))
+       (mapcar (lambda (b) (cons (car b) (list 'board buffer (cdr b))))
+               containers)))))
+
+(defun simply-kanban--read-spec (boards)
+  "Prompt for one of BOARDS (a list of (NAME . SPEC)) and return that pair."
+  (let* ((names (mapcar #'car boards))
+         (choice (completing-read "Kanban: " names nil t)))
+    (assoc choice boards)))
 
 (defun simply-kanban--spec-buffers (spec)
   "Resolve SPEC to a list of live Org buffers."
   (pcase spec
     (`(buffer . ,buffer) (and (buffer-live-p buffer) (list buffer)))
+    (`(board ,buffer ,_marker) (and (buffer-live-p buffer) (list buffer)))
+    (`(toplevel . ,buffer) (and (buffer-live-p buffer) (list buffer)))
     (`(files . ,files)
      (delq nil (mapcar (lambda (f)
                          (when (and f (file-exists-p f))
@@ -393,7 +499,14 @@ Must be called with the board buffer current and its window selected."
   (let* ((inhibit-read-only t)
          (buffers (simply-kanban--spec-buffers spec))
          (simply-kanban--multi-source (> (length buffers) 1))
-         (tasks (simply-kanban--collect-all buffers))
+         (tasks (pcase spec
+                  (`(board ,buf ,marker)
+                   (and (buffer-live-p buf)
+                        (simply-kanban--collect-tasks buf marker)))
+                  (`(toplevel . ,buf)
+                   (and (buffer-live-p buf)
+                        (simply-kanban--collect-tasks buf 'toplevel)))
+                  (_ (simply-kanban--collect-all buffers))))
          (tasks (if simply-kanban--tag-filter
                     (cl-remove-if-not
                      (lambda (tk) (member simply-kanban--tag-filter (plist-get tk :tags)))
@@ -867,6 +980,7 @@ that share the same `simply-kanban-marker' text property."
     (define-key map (kbd "F") #'simply-kanban-toggle-follow)
     (define-key map (kbd "e") #'simply-kanban-toggle-expand)
     (define-key map (kbd "E") #'simply-kanban-toggle-expand-all)
+    (define-key map (kbd "B") #'simply-kanban-switch-board)
     (define-key map (kbd "g") #'simply-kanban-refresh)
     (define-key map (kbd "q") #'quit-window)
     map)
@@ -877,6 +991,16 @@ that share the same `simply-kanban-marker' text property."
   (pcase simply-kanban--source-spec
     (`(buffer . ,buf)
      (propertize (if (buffer-live-p buf) (buffer-name buf) "?") 'face 'success))
+    (`(board ,buf ,marker)
+     (propertize (format "%s ▸ %s"
+                         (if (buffer-live-p buf) (buffer-name buf) "?")
+                         (or (simply-kanban--board-name marker) "?"))
+                 'face 'success))
+    (`(toplevel . ,buf)
+     (propertize (format "%s ▸ %s"
+                         (if (buffer-live-p buf) (buffer-name buf) "?")
+                         simply-kanban-toplevel-name)
+                 'face 'success))
     (`(files . ,files)
      (propertize (format "agenda (%d)" (length files)) 'face 'success))
     (_ (propertize "—" 'face 'shadow))))
@@ -909,6 +1033,9 @@ that share the same `simply-kanban-marker' text property."
                      (propertize "[ON]" 'face 'success)
                    ""))
           "  "
+          (:eval (if (memq (car-safe simply-kanban--source-spec) '(board toplevel))
+                     (concat (propertize "B" 'face 'help-key-binding) " board  ")
+                   ""))
           (:eval (propertize "g" 'face 'help-key-binding)) " refresh  "
           (:eval (propertize "q" 'face 'help-key-binding)) " quit"))
   (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t))
@@ -927,11 +1054,45 @@ The buffer is displayed before rendering so columns size to the window."
 (defun simply-kanban ()
   "Open a kanban board for the current Org buffer.
 Columns are the buffer's Org TODO keywords; cards are the headings
-carrying those keywords."
+carrying those keywords.
+
+If the buffer defines several boards -- level-1 headings whose subtrees
+hold the TODO cards (see `simply-kanban--scan-boards') -- you are prompted
+for which one to open, and \\[simply-kanban-switch-board] switches between
+them."
   (interactive)
   (unless (derived-mode-p 'org-mode)
     (user-error "Not in an Org buffer"))
-  (simply-kanban--open (cons 'buffer (current-buffer))))
+  (let ((boards (simply-kanban--file-boards (current-buffer))))
+    (if boards
+        (let ((choice (if (cdr boards)
+                          (simply-kanban--read-spec boards)
+                        (car boards))))
+          (when choice
+            (simply-kanban--open (cdr choice))))
+      (simply-kanban--open (cons 'buffer (current-buffer))))))
+
+(defun simply-kanban-switch-board ()
+  "Switch to another board defined in the same Org file.
+Only available when the current board came from a multi-board file."
+  (interactive)
+  (let ((buf (pcase simply-kanban--source-spec
+               (`(board ,b ,_) b)
+               (`(toplevel . ,b) b))))
+    (unless buf
+      (user-error "Not a multi-board kanban"))
+    (unless (buffer-live-p buf)
+      (user-error "Source Org buffer is gone"))
+    (let ((boards (simply-kanban--file-boards buf)))
+      (unless boards
+        (user-error "No boards found in %s" (buffer-name buf)))
+      (let ((choice (simply-kanban--read-spec boards)))
+        (when choice
+          (setq simply-kanban--source-spec (cdr choice)
+                simply-kanban--tag-filter nil
+                simply-kanban--expanded-cards nil)
+          (simply-kanban-refresh)
+          (message "Board: %s" (car choice)))))))
 
 ;;;###autoload
 (defun simply-kanban-agenda ()

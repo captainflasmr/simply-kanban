@@ -9,27 +9,46 @@ All notable changes to Simply Kanban are documented in this file.
 The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]], and this project adheres to
 [[https://semver.org/spec/v2.0.0.html][Semantic Versioning]].
 
+* [0.4.0] - 2026-05-31
+
+** Added
+
+- Multiple boards per file: a level-1 heading with no TODO keyword becomes a separate board whose cards are the TODO headings in its subtree.  When a file defines several, ~simply-kanban~ prompts for which to open and ~B~ (~simply-kanban-switch-board~) switches between them.
+- Top-level board: loose level-1 TODO headings in a multi-board file are still offered as a flat board, named by ~simply-kanban-toplevel-name~ (default "Top Level").
+- Card body expansion: ~e~ toggles the Org body of the card at point in and out, ~E~ toggles every card.  Plain flat files are unaffected.
+- Tags on cards: a card now shows its Org tags below the title, in ~:tag:~ form using the new ~simply-kanban-tag~ face.
+- Set tags from the board: ~:~ runs Org's native tag prompt on the card's heading, then saves and refreshes.
+- Heading pulse: revealing a heading (~RET~) and follow mode briefly pulse the target Org heading line.  Toggle with ~simply-kanban-pulse-on-goto~ (default ~t~); the pulse uses the new ~simply-kanban-flash~ face.
+- Save after change: ~simply-kanban-save-after-change~ (default ~t~) saves the source Org buffer after a status change or deletion.
+
+** Changed
+
+- ~RET~ no longer moves focus to the Org file: it reveals the heading in another window while keeping point on the board.
+- Column headers now render the keyword title above the divider rule (previously inverted).
+- Card titles render in the normal weight and only become bold when the card is focused; the focused-card highlight uses a bold weight rather than a background color.
+
+** Removed
+
+- Automatic column refit on window resize (the ~window-size-change-functions~ hook): it added noticeable lag.  Press ~g~ to refit after resizing.
+
+** Fixed
+
+- Heading body extraction no longer captures the following heading's text when an entry has no content of its own.
+
 * [0.3.0] - 2026-05-31
 
 ** Added
 
-- Color-coded TODO states: column headers and card borders now use the same
-  colors as Org mode's TODO keywords. Respects custom faces defined in
-  ~org-todo-keyword-faces~, falling back to ~org-todo~ for active states and
-  ~org-done~ for done states.
+- Color-coded TODO states: column headers and card borders now use the same colors as Org mode's TODO keywords. Respects custom faces defined in ~org-todo-keyword-faces~, falling back to ~org-todo~ for active states and ~org-done~ for done states.
 
 * [0.2.0] - 2026-05-31
 
 ** Added
 
-- Tag filtering: press ~t~ to filter the board by tag, ~T~ to clear the filter.
-  Active filter is shown in the header line.
+- Tag filtering: press ~t~ to filter the board by tag, ~T~ to clear the filter.  Active filter is shown in the header line.
 - Delete card: press ~k~ to delete the Org heading at point (with confirmation).
-- Jump to source in another window: press ~v~ to open the heading in a split
-  window, keeping the board visible.
-- Priority sorting: new customisation option ~simply-kanban-sort-by-priority~
-  (default ~nil~). When enabled, cards within each column are sorted by priority
-  (A > B > C > none).
+- Jump to source in another window: press ~v~ to open the heading in a split window, keeping the board visible.
+- Priority sorting: new customisation option ~simply-kanban-sort-by-priority~ (default ~nil~). When enabled, cards within each column are sorted by priority (A > B > C > none).
 - Automatic column refit on window resize via ~window-size-change-functions~.
 
 ** Changed
