@@ -6,16 +6,30 @@
 
 All notable changes to Simply Kanban are documented in this file.
 
-The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]], and this project adheres to [[https://semver.org/spec/v2.0.0.html][Semantic Versioning]].
+The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]], and this project adheres to
+[[https://semver.org/spec/v2.0.0.html][Semantic Versioning]].
+
+* [0.3.0] - 2026-05-31
+
+** Added
+
+- Color-coded TODO states: column headers and card borders now use the same
+  colors as Org mode's TODO keywords. Respects custom faces defined in
+  ~org-todo-keyword-faces~, falling back to ~org-todo~ for active states and
+  ~org-done~ for done states.
 
 * [0.2.0] - 2026-05-31
 
 ** Added
 
-- Tag filtering: press ~t~ to filter the board by tag, ~T~ to clear the filter.  Active filter is shown in the header line.
+- Tag filtering: press ~t~ to filter the board by tag, ~T~ to clear the filter.
+  Active filter is shown in the header line.
 - Delete card: press ~k~ to delete the Org heading at point (with confirmation).
-- Jump to source in another window: press ~v~ to open the heading in a split window, keeping the board visible.
-- Priority sorting: new customisation option ~simply-kanban-sort-by-priority~ (default ~nil~). When enabled, cards within each column are sorted by priority (A > B > C > none).
+- Jump to source in another window: press ~v~ to open the heading in a split
+  window, keeping the board visible.
+- Priority sorting: new customisation option ~simply-kanban-sort-by-priority~
+  (default ~nil~). When enabled, cards within each column are sorted by priority
+  (A > B > C > none).
 - Automatic column refit on window resize via ~window-size-change-functions~.
 
 ** Changed

@@ -1,7 +1,7 @@
 ;;; simply-kanban.el --- Org-linked kanban board -*- lexical-binding: t; -*-
 
 ;; Author: James Dyer <captainflasmr@gmail.com>
-;; Version: 0.2.0
+;; Version: 0.3.0
 ;; Package-Requires: ((emacs "27.2"))
 ;; Keywords: outlines, convenience, tools, org
 ;; URL: https://github.com/captainflasmr/simply-kanban
@@ -93,6 +93,10 @@ Columns otherwise expand to fill the board window, divided evenly."
   '((t :inherit highlight :weight bold))
   "Face used to highlight the card at point."
   :group 'simply-kanban)
+
+(defun simply-kanban--keyword-face (keyword)
+  "Return the face for TODO KEYWORD, using Org's native face lookup."
+  (org-get-todo-face keyword))
 
 ;;; Board state (buffer-local in the board buffer)
 
@@ -200,6 +204,8 @@ buffer (or buffers sharing a workflow) the natural order is kept."
 (defun simply-kanban--format-card (task width)
   "Return a list of card lines for TASK fitting in WIDTH columns."
   (let* ((inner (max 1 (- width 4)))
+         (keyword (plist-get task :keyword))
+         (border-face (simply-kanban--keyword-face keyword))
          (prio (plist-get task :priority))
          (tags (plist-get task :tags))
          (file (and simply-kanban--multi-source (plist-get task :file)))
@@ -211,16 +217,24 @@ buffer (or buffers sharing a workflow) the natural order is kept."
                             (when file (concat "» " file))))
                 " "))
          (box (lambda (s)
-                (format "│ %s │"
-                        (simply-kanban--pad (truncate-string-to-width s inner)
-                                            inner))))
+                (concat (propertize "│" 'face border-face)
+                        " "
+                        (simply-kanban--pad (truncate-string-to-width s inner) inner)
+                        " "
+                        (propertize "│" 'face border-face))))
          lines)
-    (push (concat "┌" (make-string (- width 2) ?─) "┐") lines)
+    (push (concat (propertize "┌" 'face border-face)
+                  (propertize (make-string (- width 2) ?─) 'face border-face)
+                  (propertize "┐" 'face border-face))
+          lines)
     (dolist (tl title-lines)
       (push (funcall box tl) lines))
     (unless (string-empty-p meta)
       (push (funcall box meta) lines))
-    (push (concat "└" (make-string (- width 2) ?─) "┘") lines)
+    (push (concat (propertize "└" 'face border-face)
+                  (propertize (make-string (- width 2) ?─) 'face border-face)
+                  (propertize "┘" 'face border-face))
+          lines)
     (nreverse lines)))
 
 (defun simply-kanban--priority-order (prio)
@@ -244,8 +258,9 @@ Each returned string is exactly WIDTH columns wide."
                                 (< (simply-kanban--priority-order (plist-get a :priority))
                                    (simply-kanban--priority-order (plist-get b :priority)))))
                       col-tasks))
+         (header-face (simply-kanban--keyword-face keyword))
          (header (propertize (format " %s · %d" keyword (length col-tasks))
-                             'face 'simply-kanban-column-header
+                             'face header-face
                              'simply-kanban-keyword keyword))
          (cells (list (simply-kanban--pad header width)
                       (simply-kanban--pad "" width))))
