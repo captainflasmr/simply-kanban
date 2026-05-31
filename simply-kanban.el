@@ -49,6 +49,7 @@
 ;;   T              clear tag filter
 ;;   :              set the Org tags on the card at point
 ;;   ,              set the Org priority of the card at point
+;;   ;              set the Org effort estimate on the card at point
 ;;   e              toggle the body of the card at point
 ;;   E              toggle the body of every card
 ;;   F              toggle follow mode
@@ -99,6 +100,14 @@ Columns otherwise expand to fill the board window, divided evenly."
   :type 'boolean
   :group 'simply-kanban)
 
+(defcustom simply-kanban-show-effort t
+  "When non-nil, show each card's Org effort estimate and a per-column total.
+The estimate is read from the card heading's `Effort' property (the value
+Org's \\[org-set-effort] sets); cards without one show nothing.  The column
+header then appends the summed effort of its cards in brackets."
+  :type 'boolean
+  :group 'simply-kanban)
+
 (defcustom simply-kanban-save-after-change t
   "When non-nil, save a source Org buffer after the board edits it.
 Edits include changing a card's status and deleting a heading."
@@ -128,6 +137,11 @@ inside a container."
   "Face for the tags shown on a card.
 Deliberately does not inherit `org-tag': that face is commonly scaled to a
 height other than 1.0, which would break the board's monospace alignment."
+  :group 'simply-kanban)
+
+(defface simply-kanban-effort
+  '((t :inherit org-special-keyword))
+  "Face for the effort estimate badge shown on a card and column total."
   :group 'simply-kanban)
 
 (defcustom simply-kanban-pulse-on-goto t
@@ -231,6 +245,7 @@ RESTRICT limits which entries become cards:
                                   :body (simply-kanban--entry-body)
                                   :priority (nth 3 comps)
                                   :tags (org-get-tags nil t)
+                                  :effort (org-entry-get nil "Effort")
                                   :file file
                                   :marker (point-marker))
                             tasks)))))))
@@ -373,6 +388,27 @@ buffer (or buffers sharing a workflow) the natural order is kept."
        (seq-some (lambda (m) (simply-kanban--same-card-p m marker))
                  simply-kanban--expanded-cards)))
 
+(defun simply-kanban--effort-minutes (effort)
+  "Return EFFORT (an Org effort string such as \"1:30\") in minutes, or nil.
+Returns nil when EFFORT is empty or cannot be parsed."
+  (when (and effort (not (string-empty-p effort))
+             (fboundp 'org-duration-to-minutes))
+    (ignore-errors (org-duration-to-minutes effort))))
+
+(defun simply-kanban--format-effort (minutes)
+  "Return MINUTES formatted as an Org duration string."
+  (if (fboundp 'org-duration-from-minutes)
+      (org-duration-from-minutes minutes)
+    (format "%dm" (round minutes))))
+
+(defun simply-kanban--column-effort (tasks)
+  "Return the summed effort of TASKS as a duration string, or nil when none set."
+  (let ((total (cl-reduce
+                (lambda (acc tk)
+                  (+ acc (or (simply-kanban--effort-minutes (plist-get tk :effort)) 0)))
+                tasks :initial-value 0)))
+    (when (> total 0) (simply-kanban--format-effort total))))
+
 (defun simply-kanban--format-card (task width)
   "Return compact card lines for TASK fitting WIDTH.
 A card shows its title prefixed by a priority cookie when one is set, then
@@ -394,6 +430,10 @@ follows below a divider."
                         (propertize (concat ":" (mapconcat #'identity tags ":") ":")
                                     'face 'simply-kanban-tag)
                         inner)))
+         (effort (and simply-kanban-show-effort (plist-get task :effort)))
+         (effort-line (when (and effort (not (string-empty-p effort)))
+                        (propertize (concat "Effort: " effort)
+                                    'face 'simply-kanban-effort)))
          (file-line (when simply-kanban--multi-source
                       (propertize (concat "» " (or (plist-get task :file) "org"))
                                   'face 'shadow)))
@@ -415,6 +455,8 @@ follows below a divider."
       (push (funcall box tl) lines))
     (dolist (tline tags-lines)
       (push (funcall box tline) lines))
+    (when effort-line
+      (push (funcall box effort-line) lines))
     (when file-line
       (push (funcall box file-line) lines))
     (when body
@@ -449,7 +491,10 @@ Each returned string is exactly WIDTH columns wide."
                                    (simply-kanban--priority-order (plist-get b :priority)))))
                       col-tasks))
          (header-face (simply-kanban--keyword-face keyword))
-         (header (propertize (format " %s (%d)" keyword (length col-tasks))
+         (effort-total (and simply-kanban-show-effort
+                            (simply-kanban--column-effort col-tasks)))
+         (header (propertize (concat (format " %s (%d)" keyword (length col-tasks))
+                                     (when effort-total (format " [%s]" effort-total)))
                              'face header-face
                              'simply-kanban-keyword keyword))
          (divider (propertize (make-string width ?─)
@@ -787,6 +832,21 @@ Candidates are the keywords of the card's own Org file."
       (simply-kanban-refresh)
       (simply-kanban--goto-marker marker))))
 
+(defun simply-kanban-set-effort ()
+  "Set the Org effort estimate of the card at point using Org's native prompt."
+  (interactive)
+  (let ((marker (simply-kanban--marker-at-point)))
+    (if (not (and marker (buffer-live-p (marker-buffer marker))))
+        (message "Point is not on a card")
+      (with-current-buffer (marker-buffer marker)
+        (org-with-wide-buffer
+         (goto-char marker)
+         (org-back-to-heading t)
+         (call-interactively #'org-set-effort)))
+      (simply-kanban--maybe-save (marker-buffer marker))
+      (simply-kanban-refresh)
+      (simply-kanban--goto-marker marker))))
+
 (defun simply-kanban-set-tag-filter ()
   "Filter the board to show only cards with a given tag."
   (interactive)
@@ -992,6 +1052,7 @@ that share the same `simply-kanban-marker' text property."
     (define-key map (kbd "T") #'simply-kanban-clear-tag-filter)
     (define-key map (kbd ":") #'simply-kanban-set-tags)
     (define-key map (kbd ",") #'simply-kanban-set-priority)
+    (define-key map (kbd ";") #'simply-kanban-set-effort)
     (define-key map (kbd "F") #'simply-kanban-toggle-follow)
     (define-key map (kbd "e") #'simply-kanban-toggle-expand)
     (define-key map (kbd "E") #'simply-kanban-toggle-expand-all)
@@ -1042,6 +1103,7 @@ Uses the plain header-line foreground so it reads well on any theme."
           (:eval (propertize "s" 'face 'help-key-binding)) " status  "
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
           (:eval (propertize ":" 'face 'help-key-binding)) " tags  "
+          (:eval (propertize ";" 'face 'help-key-binding)) " effort  "
           (:eval (propertize "t" 'face 'help-key-binding)) " tag  "
           (:eval (propertize "q" 'face 'help-key-binding)) " quit"))
   (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t))
@@ -1071,6 +1133,7 @@ Uses the plain header-line foreground so it reads well on any theme."
     ("s" "set status"      simply-kanban-set-status)
     ("," "set priority"    simply-kanban-set-priority)
     (":" "set tags"        simply-kanban-set-tags)
+    (";" "set effort"      simply-kanban-set-effort)
     ("k" "delete card"     simply-kanban-delete)]
    ["Reveal"
     ("RET" "reveal heading" simply-kanban-goto)

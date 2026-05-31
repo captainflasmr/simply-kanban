@@ -9,6 +9,12 @@ All notable changes to Simply Kanban are documented in this file.
 The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]], and this project adheres to
 [[https://semver.org/spec/v2.0.0.html][Semantic Versioning]].
 
+* [Unreleased]
+
+** Added
+
+- Effort estimates (Jira-style): a card shows its Org ~Effort~ property as an ~Effort: 2:00~ badge, and each column header sums its cards' efforts in brackets (~[2:00]~) for a per-stage workload total.  ~;~ sets the effort with Org's native ~org-set-effort~ prompt, then saves and refreshes.  Toggle the whole feature with ~simply-kanban-show-effort~ (default ~t~); the badge and total use the new ~simply-kanban-effort~ face.
+
 * [0.4.0] - 2026-05-31
 
 ** Added

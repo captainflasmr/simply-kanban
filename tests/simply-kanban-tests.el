@@ -81,6 +81,34 @@
       (should (equal (plist-get first :priority) ?A))
       (should (member "backend" (plist-get first :tags))))))
 
+(ert-deftest sk-test-collect-effort ()
+  "`--collect-tasks' reads the heading's Effort property into `:effort'."
+  (sk-test-with-org (concat "#+TODO: TODO | DONE\n\n"
+                            "* TODO Parser\n"
+                            ":PROPERTIES:\n:Effort:   2:00\n:END:\n"
+                            "* TODO Render\n")
+    (let ((tasks (simply-kanban--collect-tasks src)))
+      (should (string= (plist-get (car tasks) :effort) "2:00"))
+      (should (null (plist-get (cadr tasks) :effort))))))
+
+(ert-deftest sk-test-column-effort ()
+  "`--column-effort' sums the cards' efforts as a duration, nil when none set."
+  (should (string= (simply-kanban--column-effort
+                    (list (list :effort "1:30") (list :effort "0:30")
+                          (list :effort nil)))
+                   "2:00"))
+  (should (null (simply-kanban--column-effort
+                 (list (list :effort nil) (list :effort ""))))))
+
+(ert-deftest sk-test-format-card-shows-effort ()
+  "A card with an effort renders a badge line; one without does not."
+  (let ((with (simply-kanban--format-card
+               (list :keyword "TODO" :title "x" :effort "1:00") 20))
+        (without (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x") 20)))
+    (should (cl-some (lambda (l) (string-match-p "1:00" l)) with))
+    (should-not (cl-some (lambda (l) (string-match-p "1:00" l)) without))))
+
 ;;; Rendering / navigation
 
 (defmacro sk-test-with-board (content &rest body)
@@ -298,6 +326,7 @@ BODY runs with `board' current."
   (should (eq (lookup-key simply-kanban-mode-map "t") 'simply-kanban-set-tag-filter))
   (should (eq (lookup-key simply-kanban-mode-map "T") 'simply-kanban-clear-tag-filter))
   (should (eq (lookup-key simply-kanban-mode-map "F") 'simply-kanban-toggle-follow))
+  (should (eq (lookup-key simply-kanban-mode-map ";") 'simply-kanban-set-effort))
   (should (eq (lookup-key simply-kanban-mode-map "n") 'simply-kanban-next-card)))
 
 ;;; Dynamic column width
@@ -324,6 +353,20 @@ BODY runs with `board' current."
       (re-search-forward "Parser")
       (org-back-to-heading t)
       (should (string= (org-get-todo-state) "DONE")))))
+
+(ert-deftest sk-test-set-effort ()
+  "`simply-kanban-set-effort' writes the Effort property back to Org."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Parser\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "1:00")))
+      (simply-kanban-set-effort))
+    (with-current-buffer src
+      (goto-char (point-min))
+      (re-search-forward "Parser")
+      (org-back-to-heading t)
+      (should (string= (org-entry-get nil "Effort") "1:00")))))
 
 ;;; Tag filtering
 

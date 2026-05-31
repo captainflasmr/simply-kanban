@@ -49,6 +49,7 @@ A header-line shows the source and the key reminders.  Columns expand to fill th
 | =T=       | clear tag filter                                     |
 | =:=       | set the Org tags on the card at point                |
 | =,=       | set the Org priority of the card at point            |
+| =;=       | set the Org effort estimate on the card at point     |
 | =e= / =E= | toggle the body of the card / every card             |
 | =F=       | toggle follow mode (show heading as you move)        |
 | =B=       | switch board (multi-board files only)                |
@@ -60,7 +61,7 @@ Press =SPC= (or =?=) for a =transient= menu grouping every command (Navigate / M
 
 The card at point is highlighted, and navigating moves the highlight onto the new card.
 
-Cards are deliberately compact so you can fit many per window: a card shows its title (prefixed by a priority cookie such as =[#A]= only when one is set) and, when present, its tags.  In an aggregated board it also shows its source file (=» file=).  Press =e= to expand a card and show the heading's body text inline.  When you reveal a heading with =RET= (or while follow mode is on) the target heading line briefly pulses, and focus stays on the board.
+Cards are deliberately compact so you can fit many per window: a card shows its title (prefixed by a priority cookie such as =[#A]= only when one is set), its tags when present, and its Org effort estimate as =Effort: 2:00= when the heading carries an =Effort= property.  In an aggregated board it also shows its source file (=» file=).  Press =;= to set the effort with Org's native prompt (=org-set-effort=); each column header then sums its cards' efforts in brackets (=[2:00]=), giving a Jira-style per-stage workload total.  Press =e= to expand a card and show the heading's body text inline.  When you reveal a heading with =RET= (or while follow mode is on) the target heading line briefly pulses, and focus stays on the board.
 
 * Multiple boards in one file
 
@@ -86,11 +87,12 @@ Status changes and deletions are written straight back to the source file and, b
 - =simply-kanban-buffer-name= — name of the board buffer.
 - =simply-kanban-auto-refresh= (default =t=) — refresh the board automatically whenever its source Org buffer is saved.
 - =simply-kanban-sort-by-priority= (default =nil=) — when non-nil, sort cards within each column by priority (A > B > C > none).
+- =simply-kanban-show-effort= (default =t=) — show each card's Org =Effort= estimate (=Effort: 2:00=) and sum each column's efforts in brackets (=[2:00]=) in its header.
 - =simply-kanban-save-after-change= (default =t=) — save the source Org buffer after a status change or deletion.
 - =simply-kanban-pulse-on-goto= (default =t=) — briefly pulse the target heading line when revealing it (=RET= and follow mode).
 - =simply-kanban-toplevel-name= (default ="Top Level"=) — name of the flat board holding a multi-board file's loose level-1 TODO headings.
 
-Faces: =simply-kanban-current-card= (focused card), =simply-kanban-tag= (card tags), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
+Faces: =simply-kanban-current-card= (focused card), =simply-kanban-tag= (card tags), =simply-kanban-effort= (effort badge and column total), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
 
 * Kanban Feature Comparison Matrix
 
@@ -107,6 +109,7 @@ A cross-cutting view of how Simply Kanban sits among the other kanban options fo
 | Transient menu                  | No         | No        | No         | Yes           |
 | Tag filtering                   | No         | No        | No         | Yes           |
 | Priority cookies shown          | No         | No        | Partial    | Yes           |
+| Effort estimate + column total  | No         | No        | No         | Yes           |
 | Inline card body / detail       | No         | No        | Yes        | Yes           |
 | Multiple boards per file        | Yes        | Yes       | Yes        | Yes           |
 | Agenda-wide aggregation         | No         | No        | No         | Yes           |
@@ -144,7 +147,7 @@ Where Simply Kanban already leads is the live, keyboard-driven board buffer; wha
 
 Reading the gaps as a rough roadmap, three themes emerge:
 
-- *Richer cards* — deadline/scheduled badges, checklist progress, label colours and per-column WIP limits are all derivable from data already in the Org subtree (=DEADLINE=, =SCHEDULED=, checkbox stats, tags), so they need no new storage — only rendering.  These are the cheapest wins and several (=WIP limits=, =deadline badges=, =swimlanes by tag=) already appear under *Status → Future ideas*.
+- *Richer cards* — deadline/scheduled badges, checklist progress, label colours and per-column WIP limits are all derivable from data already in the Org subtree (=DEADLINE=, =SCHEDULED=, checkbox stats, tags), so they need no new storage — only rendering.  These are the cheapest wins and several (=WIP limits=, =deadline badges=, =swimlanes by tag=) already appear under *Status → Future ideas*.  The =Effort= property is already surfaced this way: an =Effort:= badge per card and a bracketed total per column.
 - *Editing from the board* — add-card, rename, and inline body editing would close the gap with =org-trello='s card creation while keeping the Org buffer as the single source of truth.
 - *Broader selection* — =org-kanban='s =:match= query and depth scoping point at a more flexible card-selection model than the current TODO-keyword + single-tag filter (which is why those two rows are marked =Partial=).
 
