@@ -121,11 +121,6 @@ inside a container."
   "Face used to highlight the card at point."
   :group 'simply-kanban)
 
-(defface simply-kanban-header-line
-  '((t :foreground "white" :background "#2257a0" :weight bold))
-  "Face for the board's top header-line, giving it a plain, bold fg/bg bar."
-  :group 'simply-kanban)
-
 (defface simply-kanban-tag
   '((t :inherit shadow))
   "Face for the tags shown on a card.
@@ -1004,23 +999,22 @@ that share the same `simply-kanban-marker' text property."
   "Keymap for `simply-kanban-mode'.")
 
 (defun simply-kanban--header-source ()
-  "Return a propertized description of the board's source for the header-line."
+  "Return a description of the board's source for the header-line.
+Uses the plain header-line foreground so it reads well on any theme."
   (pcase simply-kanban--source-spec
     (`(buffer . ,buf)
-     (propertize (if (buffer-live-p buf) (buffer-name buf) "?") 'face 'success))
+     (if (buffer-live-p buf) (buffer-name buf) "?"))
     (`(board ,buf ,marker)
-     (propertize (format "%s ▸ %s"
-                         (if (buffer-live-p buf) (buffer-name buf) "?")
-                         (or (simply-kanban--board-name marker) "?"))
-                 'face 'success))
+     (format "%s ▸ %s"
+             (if (buffer-live-p buf) (buffer-name buf) "?")
+             (or (simply-kanban--board-name marker) "?")))
     (`(toplevel . ,buf)
-     (propertize (format "%s ▸ %s"
-                         (if (buffer-live-p buf) (buffer-name buf) "?")
-                         simply-kanban-toplevel-name)
-                 'face 'success))
+     (format "%s ▸ %s"
+             (if (buffer-live-p buf) (buffer-name buf) "?")
+             simply-kanban-toplevel-name))
     (`(files . ,files)
-     (propertize (format "agenda (%d)" (length files)) 'face 'success))
-    (_ (propertize "—" 'face 'shadow))))
+     (format "agenda (%d)" (length files)))
+    (_ "—")))
 
 (define-derived-mode simply-kanban-mode special-mode "Kanban"
   "Major mode for the Org-linked kanban board.
@@ -1028,8 +1022,6 @@ that share the same `simply-kanban-marker' text property."
 \\{simply-kanban-mode-map}"
   (setq-local truncate-lines t)
   (setq-local cursor-type 'box)
-  ;; Give the board's header-line a plain, bold fg/bg bar so it stands out.
-  (face-remap-set-base 'header-line 'simply-kanban-header-line)
   (setq header-line-format
         '(" Kanban  "
           (:eval (simply-kanban--header-source))

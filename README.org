@@ -85,7 +85,7 @@ Status changes and deletions are written straight back to the source file and, b
 - =simply-kanban-pulse-on-goto= (default =t=) — briefly pulse the target heading line when revealing it (=RET= and follow mode).
 - =simply-kanban-toplevel-name= (default ="Top Level"=) — name of the flat board holding a multi-board file's loose level-1 TODO headings.
 
-Faces: =simply-kanban-header-line= (the top header-line bar), =simply-kanban-current-card= (focused card), =simply-kanban-tag= (card tags), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
+Faces: =simply-kanban-current-card= (focused card), =simply-kanban-tag= (card tags), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
 
 * Development
 

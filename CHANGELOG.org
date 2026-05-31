@@ -24,7 +24,6 @@ The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]
 
 ** Changed
 
-- The board's top header-line now uses a plain, bold foreground/background bar (the new ~simply-kanban-header-line~ face) so it stands out from the board body.
 - Compact cards: cards now fit far more per window.  A card shows its title (prefixed by an Org priority cookie such as ~[#A]~ only when one is set), its tags when present, and -- in an aggregated board -- its source file (~» file~).  The always-on priority/location/author lines, the metadata divider, and the blank line between cards were removed.
 - ~RET~ no longer moves focus to the Org file: it reveals the heading in another window while keeping point on the board.
 - Column headers now render the keyword title above the divider rule (previously inverted).
