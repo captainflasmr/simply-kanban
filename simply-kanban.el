@@ -916,6 +916,7 @@ Installed buffer-locally on the board buffer's `kill-buffer-hook'."
 When enabled, navigating between cards also reveals the heading in its file."
   (interactive)
   (setq simply-kanban--follow (not simply-kanban--follow))
+  (force-mode-line-update)
   (message "Follow mode %s" (if simply-kanban--follow "enabled" "disabled"))
   (when simply-kanban--follow (simply-kanban--follow-card)))
 
@@ -1033,27 +1034,15 @@ Uses the plain header-line foreground so it reads well on any theme."
                      (propertize (format " [tag: %s]" simply-kanban--tag-filter) 'face 'success)
                    ""))
           "   "
-          (:eval (propertize "SPC/?" 'face 'help-key-binding)) " menu  "
-          (:eval (propertize "RET" 'face 'help-key-binding)) " goto  "
-          (:eval (propertize "v" 'face 'help-key-binding)) " view  "
-          (:eval (propertize "{/}" 'face 'help-key-binding)) " move  "
-          (:eval (propertize "s" 'face 'help-key-binding)) " status  "
-          (:eval (propertize "k" 'face 'help-key-binding)) " delete  "
-          (:eval (propertize "t/T" 'face 'help-key-binding)) " filter  "
-          (:eval (propertize ":" 'face 'help-key-binding)) " tags  "
-          (:eval (propertize "," 'face 'help-key-binding)) " prio  "
-          (:eval (propertize "n/p" 'face 'help-key-binding)) " card  "
-          (:eval (propertize "TAB" 'face 'help-key-binding)) " column  "
-          (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
           (:eval (propertize "F" 'face 'help-key-binding)) " follow"
-          (:eval (if simply-kanban--follow
-                     (propertize "[ON]" 'face 'success)
-                   ""))
+          (:eval (if simply-kanban--follow "[ON]" ""))
           "  "
-          (:eval (if (memq (car-safe simply-kanban--source-spec) '(board toplevel))
-                     (concat (propertize "B" 'face 'help-key-binding) " board  ")
-                   ""))
-          (:eval (propertize "g" 'face 'help-key-binding)) " refresh  "
+          (:eval (propertize "RET" 'face 'help-key-binding)) " goto  "
+          (:eval (propertize "{}" 'face 'help-key-binding)) " move  "
+          (:eval (propertize "s" 'face 'help-key-binding)) " status  "
+          (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
+          (:eval (propertize ":" 'face 'help-key-binding)) " tags  "
+          (:eval (propertize "t" 'face 'help-key-binding)) " tag  "
           (:eval (propertize "q" 'face 'help-key-binding)) " quit"))
   (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t))
 
