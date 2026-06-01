@@ -76,7 +76,7 @@
   :group 'org
   :prefix "simply-kanban-")
 
-(defcustom simply-kanban-min-column-width 24
+(defcustom simply-kanban-min-column-width 16
   "Minimum width in characters of each kanban column.
 Columns otherwise expand to fill the board window, divided evenly."
   :type 'integer
