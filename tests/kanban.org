@@ -1,0 +1,199 @@
+* CUI MVP - CUIS Phased Implementation Plan
+
+** DONE Phase 0: Upstream FedProClient baseline
+
+The unmodified upstream FedProClient codebase from Pitch.  This is the starting point before any CUIS work.
+
+- Focussing mainly on Java multi-module Gradle build under =java/= targeting JDK 17+, with:
+  - =api:HLA1516-2010=
+  - =api:HLA1516-2025=
+  - =client=, =client_common=, =client_evolved=, =session=, =protobuf=, =sample=, =sample_evolved=, =test= but there are also cpp libararies.
+
+** DONE Phase 1: CUIS design and codebase analysis notes
+
+Design notes captured before any code written, to anchor the later phases.
+
+- design document for the Common UI Server proxy federate
+
+No source code changes; notes only and put into Confluence for initial review, before I move on to the MagicDraw design process.
+
+** DOING Phase 2: MagicDraw design and Sub-Web App Blueprint
+
+*** DOING Phase 2a: Using SysML elements within MagicDraw to design the CUIS and through the colloboration portal.
+**** TODO Add CUIS requirements and link
+:PROPERTIES:
+:EFFORT:   3d
+:END:
+**** DOING Doing the review process
+:PROPERTIES:
+:EFFORT:   2d
+:END:
+*** DOING Phase 2b: Sub-Web App Blueprint
+:PROPERTIES:
+:EFFORT:   2d
+:END:
+*** DONE Define Sub App Design Process
+*** TODO Define Sub App Style Guide
+:PROPERTIES:
+:EFFORT:   2d
+:END:
+
+** DONE Phase 3: CUIS protobuf interface contracts
+
+The first CUIS Gradle module.  Defines the wire contract between Sub-Apps and the CUIS proxy before any server or client code is written.
+
+*** DONE New =java/cuis-proto/= Gradle module with =build.gradle.kts=
+*** DONE =.proto= files under =cuis-proto/src/main/proto/= defining:
+**** DONE =UFCommonUIService= gRPC service (register, publish/subscribe object attributes, update/request attribute values, publish/subscribe interaction, send interaction)
+**** DONE Request and response message types
+**** DONE =UFCommonUIClientService= gRPC service (discover_object_instance, reflect_attribute_values, remove_object_instance, provide_attribute_value_update, receive_interaction)
+**** DONE =settings.gradle.kts= amended to =include("cuis-proto")=
+
+Contracts first, nothing else in CUIS can compile without these generated classes, I think that defining a gradle build will just regenerate proto bindings without a separate script!! and be naturally part of the build process, when the other components are built through gradle they can just pull in this proto component and the java proto bindings will become naturally available.
+
+** DONE Phase 4: CUIS server module skeleton
+
+*** DONE New =java/cuis-server/= Gradle module with =build.gradle.kts= depending on =cuis-proto=, =api:HLA1516-2025=, gRPC runtime, and slf4j (for logging - always useful)
+*** DONE Java source root =cuis-server/src=
+*** DONE =settings.gradle.kts= amended to =include("cuis-server")=
+
+** DONE Phase 5: Session layer - client session and registry
+
+*** DONE =session/ClientSession.java= - per-Sub-App record holding client id, callback address, endian preference?, and sets of published/subscribed object classes and interaction classes
+*** DONE =session/SessionRegistry.java= - keyed by client id with =register=, =getSession=, and =shutdownAll= operations
+
+** DONE Phase 6: RTI handle factory - HLA/protobuf value conversion
+
+All marshalling between HLA handle types and their wire representation lives in one place, I'm not entirely sure about this yet, but it does need to be done as the proto files talk about a Data_Value and bytes so there will need to be some conversion here, as this is quite the generic proto interface then bytes seems to be quite heavily used.
+
+*** DONE =rti/CuisHandleFactory.java= with static helpers:
+**** DONE =toBytes=, =fromBytes= I guess!
+**** DONE =toProtoAttributeValues= / =toHlaAttributeValues= bridging =AttributeHandleValueMap= and the protobuf =Attribute_Values=
+**** DONE Mirror data types to original rtiambassador class definitions that are in Pitch RTI library.
+
+** DONE Phase 7: Routing engine - RTI-to-sub-app callback dispatch
+
+*** DONE =routing/RoutingEngine.java=
+*** DONE =shutdown()= for orderly teardown
+*** DONE Routing decisions walk the session registry and match against each session's subscription set, this allows for the sub-web app to clearly define its own data set as presumably this being MIMESIS and modular, we will have many sub web apps each with its own specific data set and type, possibly tied to a GUI significant element or even a federate.
+
+Probably have a go at writing a cached thread pool!, sensible to maintain resource consistency and of course to maintain asynchronous performance.  I think this is one of the drawbacks of the original demo in that the cuis iterated synchronously through all registrations, fine for the demo, but of course not very scalable.
+
+** DONE Phase 8: RTI adapter (iterated in four stages as this is rather important and key to the whole task)
+
+*** DONE Phase 8a: RTI adapter stub skeleton
+
+**** DONE =class RtiAdapter extends NullFederateAmbassador=
+**** DONE Fields: =_logger=, =_rtiAmbassador=, =_routingEngine=, always need a logger, of course the rtiambassador and we need to route the calls back to the sub web apps
+**** DONE Constructor =RtiAdapter(RTIambassador, RoutingEngine)=
+**** DONE =getRtiAmbassador()= returning the wrapped instance
+**** DONE =connectAndJoin=, =disconnect=, and all seven proxy methods (=publishObjectClassAttributes=, =subscribeObjectClassAttributes=, =updateAttributeValues=, =requestAttributeValueUpdate=, =publishInteractionClass=, I=subscribeInteractionClass=, =sendInteraction=)
+
+*** DONE Phase 8b: RTI adapter - connect, create/join, disconnect lifecycle
+
+Fills in =connectAndJoin= and =disconnect=, should be pretty easy as is just wrapping some simple calls, can probably take from the original FedPro examples.
+
+*** DONE Phase 8c: RTI adapter - publish/subscribe/update/send proxy methods
+
+**** DONE =publishObjectClassAttributes=
+**** DONE =subscribeObjectClassAttribute=
+**** DONE =updateAttributeValues=
+**** DONE =requestAttributeValueUpdate=
+**** DONE =publishInteractionClass=
+**** DONE =subscribeInteractionClass=
+**** DONE =sendInteraction=
+
+*** DONE Phase 8d: RTI adapter - FederateAmbassador callbacks and instance tracking
+
+**** DONE Five FederateAmbassador callbacks:
+
+***** DONE =discoverObjectInstance= - records the instance -> class mapping then forwards to =_routingEngine.onDiscoverObjectInstance=
+***** DONE =reflectAttributeValues= - looks up class via the map, logs and drops if unknown, converts to proto values, forwards
+***** DONE =removeObjectInstance= - removes from the map and forwards
+***** DONE =provideAttributeValueUpdate= - looks up class, walks the =AttributeHandleSet= serialising each handle, forwards
+***** DONE =receiveInteraction= - converts parameters and forwards
+
+** DOING Phase 9: gRPC service (iterated in five stages)
+:PROPERTIES:
+:SPRINT:   4
+:END:
+
+Same approach as phase 8.  =UFCommonUIServiceImpl.java= starts as a scaffold with UNIMPLEMENTED stubs and is filled in one RPC at a time.
+
+*** DONE Phase 9a: gRPC service scaffold - stub RPCs and wiring
+
+**** DONE =grpc/UFCommonUIServiceImpl.java=:
+
+***** DONE Class =extends UFCommonUIServiceGrpc.UFCommonUIServiceImplBase=, which I think are the protobuf/grpc generated bindings and is for the sub web apps calling through to the CUIS
+
+**** DONE =grpc/CuisGrpcServer.java= - starts the grpc server and also lets add some reflection so that =grpcui= can be used through a web browser and who knows, may prove useful for other things
+**** DONE =CuisMain.java= - this will be the top level main so will have to start to set things up including creating the gprc server
+
+*** DONE Phase 9b: gRPC service - implement client register RPC
+
+**** DONE =register=
+
+***** DONE Logs client id and callback address
+***** DONE Calls =_sessionRegistry.register(clientId, callbackAddress, endianPreference)=, not quite sure if we need some endianess checking yet, but as we are now operating this connection to RTI "over the network" we might need this for the conversion factory.
+
+*** DONE Phase 9c: gRPC service - implement object publish/subscribe RPCs
+
+**** DONE =publishObjectAttributes=: validates client, marshals attribute handles, calls =_rtiAdapter.publishObjectClassAttributes=, records the publication in the session, responds success
+**** DONE =subscribeObjectAttributes=: same shape against =subscribeObjectClassAttributes= and =addObjectSubscription=
+
+*** DONE Phase 9d: gRPC service - implement attribute update and request RPCs
+
+**** DONE =updateAttributeValues=: validates, converts proto =Attribute_Values= to =AttributeHandleValueMap= via =CuisHandleFactory.toHlaAttributeValues=
+**** DONE =requestObjectUpdate=: validates, marshals attribute handles, forwards to =_rtiAdapter.requestAttributeValueUpdate=
+:PROPERTIES:
+:Effort:   1d
+:END:
+
+*** DOING Phase 9e: gRPC service - implement interaction RPCs
+:PROPERTIES:
+:SPRINT:   4
+:END:
+
+Last three RPCs.
+
+**** DOING =publishInteraction= and =subscribeInteraction=, forwarding to =_rtiAdapter.publishInteractionClass= / =subscribeInteractionClass=
+:PROPERTIES:
+:EFFORT:   2d
+:SPRINT:   4
+:END:
+
+**** DOING =sendInteraction= converts proto =Parameter_Values= via =CuisHandleFactory.toHlaParameterValues= then forwards
+:PROPERTIES:
+:EFFORT:   1d
+:END:
+
+** TODO Phase 10: Mock RTI and test module scaffold
+
+A new Gradle module so CUIS can be exercised without a real Pitch RTI binary which (and it goes without saying) is very useful for software developers not having to wrangle with sorting out licencing e.t.c, I think this is doable as the RTIambassador is essentially just a data contract entry point, so why not use the base RTIambassador class and drive callbacks through a local loopback?, it should be the same as interfacing to a real RTI as the RTIambassador should be the same as this is standardised now through HLA Evolved and HLA 4.
+
+*** TODO New =java/cuis-test/= module with =build.gradle.kts= depending on =cuis-server=, =api:HLA1516-2025=, etc.
+:PROPERTIES:
+:EFFORT:   2d
+:END:
+*** TODO =cuis-test/src/.../mock/NullRTIambassador.java= - a complete no-op implementation of the sprawling =RTIambassador= interface that throws =UnsupportedOperationException= from everything, a good basic stub that we can work from
+:PROPERTIES:
+:EFFORT:   3d
+:END:
+*** TODO =cuis-test/src/.../mock/MockRTIambassador.java= - extends =NullRTIambassador= and overrides just the methods the tests exercise, recording calls and driving the CUIS =FederateAmbassador= callbacks directly to simulate federation traffic through a local loopback so the full set can be run locally.
+:PROPERTIES:
+:EFFORT:   4d
+:END:
+
+** TODO Phase 11: End-to-end demo and integration test
+
+Executable proof that the stack works, here is the fun bit!
+
+*** TODO =cuis-test/src/.../subapp/SubAppSimulator.java= - a programmatic Sub-App that speaks to the CUIS gRPC service and asserts on callbacks and will heavily lean on the work done earlier regarding setting up a sub-App blueprint
+:PROPERTIES:
+:EFFORT:   3d
+:END:
+*** TODO =cuis-test/src/.../demo/CuisDemo.java= - a runnable main that spins up =CuisMain= against =MockRTIambassador=, connects a =SubAppSimulator=, exchanges a few object updates and an interaction, and shuts everything down cleanly, it would be nice to have some nice looking terminal colour output to show the data path.  For example, this should exercise Sub-App A to CUIS to RTI (mock) and then back through Sub-App N with data passing around through the RTIAmbassador contract.
+:PROPERTIES:
+:EFFORT:   4d
+:END:
+
