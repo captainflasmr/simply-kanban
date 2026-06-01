@@ -1452,28 +1452,31 @@ Uses the plain header-line foreground so it reads well on any theme."
 \\{simply-kanban-mode-map}"
   (setq-local truncate-lines t)
   (setq-local cursor-type 'box)
+  (setq-local mode-line-buffer-identification
+              (list (propertize "%b" 'face 'mode-line-buffer-id)
+                    '(:eval (let ((src (simply-kanban--header-source)))
+                              (if (string= src "—")
+                                  ""
+                                (concat "  " (propertize src 'face 'italic)))))))
   (setq header-line-format
-        '(" Kanban  "
-          (:eval (simply-kanban--header-source))
+        '(" "
+          (:eval (propertize "F" 'face 'help-key-binding)) " follow"
+          (:eval (if simply-kanban--follow "[ON]" ""))
           (:eval (if simply-kanban--tag-filter
-                     (propertize (format " [tag: %s]" simply-kanban--tag-filter) 'face 'success)
+                     (propertize (format "  [tag: %s]" simply-kanban--tag-filter) 'face 'success)
                    ""))
           (:eval (if simply-kanban--sprint-filter
-                     (propertize (format " [sprint: %d]" simply-kanban--sprint-filter)
+                     (propertize (format "  [sprint: %d]" simply-kanban--sprint-filter)
                                  'face 'warning)
                    ""))
           "   "
-          (:eval (propertize "F" 'face 'help-key-binding)) " follow"
-          (:eval (if simply-kanban--follow "[ON]" ""))
-          "  "
-          (:eval (propertize "RET" 'face 'help-key-binding)) " goto  "
+          (:eval (propertize "SPC" 'face 'help-key-binding)) " menu  "
           (:eval (propertize "{}" 'face 'help-key-binding)) " move  "
           (:eval (propertize "s" 'face 'help-key-binding)) " status  "
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
           (:eval (propertize ":" 'face 'help-key-binding)) " tags  "
           (:eval (propertize ";" 'face 'help-key-binding)) " effort  "
           (:eval (propertize "#" 'face 'help-key-binding)) " sprint  "
-          (:eval (propertize "t" 'face 'help-key-binding)) " tag  "
           (:eval (propertize "S" 'face 'help-key-binding)) " sprint-filter  "
           (:eval (propertize "q" 'face 'help-key-binding)) " quit"))
   (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t)
