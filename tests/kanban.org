@@ -1,3 +1,6 @@
+#+options: ':t toc:nil author:nil email:nil num:nil title:nil
+#+todo: TODO DOING REVIEW | DONE CLOSED
+
 * CUI MVP - CUIS Phased Implementation Plan
 
 ** DONE Phase 0: Upstream FedProClient baseline

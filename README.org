@@ -74,6 +74,15 @@ Press =SPC= (or =?=) for a =transient= menu grouping every command (Navigate / M
 
 The card at point is highlighted, and navigating moves the highlight onto the new card.
 
+To go the other way -- from a heading in the Org file to its card -- run =M-x simply-kanban-show-card= (bound to =C-c ;= in Org buffers) from the Org buffer.  It is the inverse of =RET= / =v=: it finds the heading at (or enclosing) point among the board's cards and selects that card, showing the board in another window while focus stays in the Org buffer.  The matched card is filled (face =simply-kanban-mark=) so you can see at a glance which card relates to the heading; that fill clears the moment you navigate to another card on the board.  If no board is open yet it creates one for the file first -- in a split to the right, so the original file stays visible on the left -- and the command always tries to take you to a card.
+
+To rebind it, e.g.:
+
+#+begin_src emacs-lisp
+(with-eval-after-load 'org
+  (define-key org-mode-map (kbd "C-c k") #'simply-kanban-show-card))
+#+end_src
+
 Cards are deliberately compact so you can fit many per window: a card shows its title (prefixed by a priority cookie such as =[#A]= only when one is set), its tags when present, and its Org effort estimate as =Effort: 2:00= when the heading carries an =Effort= property.  In an aggregated board it also shows its source file (=» file=).  Press =;= to set the effort with Org's native prompt (=org-set-effort=); each column header then sums its cards' efforts in brackets (=[2:00]=), giving a Jira-style per-stage workload total.  Press =e= to expand a card and show the heading's body text inline.  When you reveal a heading with =RET= (or while follow mode is on) the target heading line briefly pulses, and focus stays on the board.
 
 * Multiple boards in one file

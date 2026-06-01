@@ -576,5 +576,146 @@ BODY runs with `board' current."
     (simply-kanban-jump-other-window)
     t))
 
+(ert-deftest sk-test-show-card-finds-anchor ()
+  "A heading's markers match its own card anchor on the board."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n"
+    (let* ((cands (with-current-buffer src
+                    (goto-char (point-min))
+                    (re-search-forward "Beta")
+                    (simply-kanban--heading-markers-upward)))
+           (anchor (seq-some #'simply-kanban--anchor-for-marker cands)))
+      (should anchor)
+      (goto-char (car anchor))
+      (let ((m (simply-kanban--marker-at-point)))
+        (should (with-current-buffer src
+                  (goto-char m) (string= (org-get-heading t t t t) "Beta")))))))
+
+(ert-deftest sk-test-show-card-walks-up-to-enclosing-card ()
+  "Point on a non-card sub-heading resolves to the enclosing card."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n** Notes\n"
+    (let* ((cands (with-current-buffer src
+                    (goto-char (point-min))
+                    (re-search-forward "Notes")
+                    (simply-kanban--heading-markers-upward)))
+           (anchor (seq-some #'simply-kanban--anchor-for-marker cands)))
+      (should (= 2 (length cands)))
+      (should anchor)
+      (goto-char (car anchor))
+      (let ((m (simply-kanban--marker-at-point)))
+        (should (with-current-buffer src
+                  (goto-char m) (string= (org-get-heading t t t t) "Alpha")))))))
+
+(ert-deftest sk-test-show-card-command ()
+  "`simply-kanban-show-card' selects, on the board, the heading at point."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n"
+    (let ((simply-kanban-buffer-name (buffer-name board)))
+      (with-current-buffer src
+        (goto-char (point-min))
+        (re-search-forward "Beta")
+        (simply-kanban-show-card))
+      (with-current-buffer board
+        (let ((m (simply-kanban--marker-at-point)))
+          (should m)
+          (should (with-current-buffer src
+                    (goto-char m) (string= (org-get-heading t t t t) "Beta"))))))))
+
+(ert-deftest sk-test-show-card-fills-then-clears ()
+  "`show-card' fills the matched card; navigating to another card clears it."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n"
+    (let ((simply-kanban-buffer-name (buffer-name board)))
+      (with-current-buffer src
+        (goto-char (point-min))
+        (re-search-forward "Beta")
+        (simply-kanban-show-card))
+      (with-current-buffer board
+        ;; The matched card carries the temporary fill.
+        (should simply-kanban--mark-overlays)
+        ;; Staying on the same card keeps it.
+        (simply-kanban--clear-mark-on-move)
+        (should simply-kanban--mark-overlays)
+        ;; Navigating to another card clears it.
+        (simply-kanban-prev-card)
+        (simply-kanban--clear-mark-on-move)
+        (should-not simply-kanban--mark-overlays)))))
+
+(ert-deftest sk-test-show-card-fill-cleared-on-refresh ()
+  "Re-rendering the board drops any stale temporary fill."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n"
+    (let ((simply-kanban-buffer-name (buffer-name board)))
+      (with-current-buffer src
+        (goto-char (point-min))
+        (re-search-forward "Beta")
+        (simply-kanban-show-card))
+      (with-current-buffer board
+        (should simply-kanban--mark-overlays)
+        (simply-kanban-refresh)
+        (should-not simply-kanban--mark-overlays)))))
+
+(ert-deftest sk-test-show-card-creates-board-when-missing ()
+  "`show-card' creates a board when none is open, then fills the card."
+  (sk-test-with-org "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n"
+    (let ((simply-kanban-buffer-name "*sk-test-autoboard*"))
+      (unwind-protect
+          (progn
+            (should-not (get-buffer simply-kanban-buffer-name))
+            (goto-char (point-min))
+            (re-search-forward "Beta")
+            (simply-kanban-show-card)
+            (let ((board (get-buffer simply-kanban-buffer-name)))
+              (should (buffer-live-p board))
+              (with-current-buffer board
+                (should simply-kanban--mark-overlays)
+                (let ((m (simply-kanban--marker-at-point)))
+                  (should (with-current-buffer src
+                            (goto-char m)
+                            (string= (org-get-heading t t t t) "Beta")))))))
+        (when (get-buffer simply-kanban-buffer-name)
+          (kill-buffer simply-kanban-buffer-name))))))
+
+(ert-deftest sk-test-show-card-create-splits-right ()
+  "Auto-creating the board splits to the right, keeping the Org file visible."
+  (sk-test-with-org "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n"
+    (let ((simply-kanban-buffer-name "*sk-test-autoboard*"))
+      (unwind-protect
+          (progn
+            (switch-to-buffer src)
+            (delete-other-windows)
+            (goto-char (point-min))
+            (re-search-forward "Beta")
+            (simply-kanban-show-card)
+            (let ((src-win (get-buffer-window src))
+                  (board-win (get-buffer-window simply-kanban-buffer-name)))
+              ;; The Org file stays visible ...
+              (should (window-live-p src-win))
+              ;; ... alongside the board, which sits to its right.
+              (should (window-live-p board-win))
+              (should (> (window-left-column board-win)
+                         (window-left-column src-win)))))
+        (when (get-buffer simply-kanban-buffer-name)
+          (kill-buffer simply-kanban-buffer-name))
+        (delete-other-windows)))))
+
+(ert-deftest sk-test-show-card-creates-all-boards-for-multiboard ()
+  "For a multi-board file `show-card' auto-creates an all-boards view."
+  (sk-test-with-org (concat "* Project Alpha\n** TODO design\n"
+                            "* Project Beta\n** TODO research\n")
+    (let ((simply-kanban-buffer-name "*sk-test-autoboard*"))
+      (unwind-protect
+          (progn
+            (goto-char (point-min))
+            (re-search-forward "research")
+            (simply-kanban-show-card)
+            (let ((board (get-buffer simply-kanban-buffer-name)))
+              (should (buffer-live-p board))
+              (with-current-buffer board
+                (should (eq (car simply-kanban--source-spec) 'all-boards))
+                (should simply-kanban--mark-overlays)
+                (let ((m (simply-kanban--marker-at-point)))
+                  (should (with-current-buffer src
+                            (goto-char m)
+                            (string= (org-get-heading t t t t) "research")))))))
+        (when (get-buffer simply-kanban-buffer-name)
+          (kill-buffer simply-kanban-buffer-name))))))
+
 (provide 'simply-kanban-tests)
 ;;; simply-kanban-tests.el ends here

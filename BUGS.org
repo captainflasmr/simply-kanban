@@ -9,11 +9,11 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** TODO simply-kanban-min-column-width 16
-
 ** TODO set depth of items
 
-** TODO reflect from org file to kanban
+** DOING reflect from org file to kanban
+
+** DOING truncate todo title length
 
 * Issues
 
