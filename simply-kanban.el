@@ -211,13 +211,6 @@ Applies both to \\[simply-kanban-goto] and to follow mode."
   "Face used to briefly pulse a heading when jumping to it from the board."
   :group 'simply-kanban)
 
-(defface simply-kanban-mark
-  '((t :inherit highlight))
-  "Face filling the card matched by \\[simply-kanban-show-card].
-A temporary cue marking the card that relates to the Org buffer; it is cleared
-as soon as you navigate to another card."
-  :group 'simply-kanban)
-
 (defun simply-kanban--keyword-face (keyword)
   "Return the face for TODO KEYWORD, using Org's native face lookup."
   (org-get-todo-face keyword))
@@ -248,14 +241,6 @@ new files.")
 
 (defvar-local simply-kanban--current-card nil
   "The marker identifying the currently highlighted card.")
-
-(defvar-local simply-kanban--mark-overlays nil
-  "Overlays filling the card flagged by `simply-kanban-show-card'.
-A temporary cue showing which card matches the Org buffer; cleared as soon
-as point moves to another card.")
-
-(defvar-local simply-kanban--mark-marker nil
-  "Source marker of the card currently filled by `simply-kanban-show-card'.")
 
 (defvar-local simply-kanban--tag-filter nil
   "When non-nil, only show cards carrying this tag.")
@@ -725,7 +710,6 @@ Must be called with the board buffer current and its window selected."
          (columns (mapcar (lambda (kw) (simply-kanban--column-cells kw tasks width))
                           keywords))
          (nrows (apply #'max 0 (mapcar #'length columns))))
-    (simply-kanban--clear-mark)
     (erase-buffer)
     (setq simply-kanban--source-spec spec
           simply-kanban--source-buffers buffers
@@ -1175,8 +1159,8 @@ belongs to.  Must be called with the Org buffer current."
 The inverse of \\[simply-kanban-goto]: run it from an Org buffer to locate the
 heading at -- or enclosing -- point among the board's cards and select that
 card.  The board is shown in another window but focus stays in the Org buffer.
-The matched card is filled with `simply-kanban-mark' to flag it; that fill is
-cleared the moment you navigate to another card on the board.
+The matched card is selected and focused with the usual bold current-card
+highlight, just as if you had navigated to it on the board.
 When the heading itself is not a card (e.g. point is on a non-TODO parent), the
 nearest enclosing card is used.
 
@@ -1212,11 +1196,11 @@ an active tag or sprint filter)."
           (let ((win (or (get-buffer-window board)
                          (display-buffer board '(nil (inhibit-same-window . t))))))
             (when (window-live-p win)
-              ;; Select and fill the card in the board window.
+              ;; Select the card in the board window, focusing it with the
+              ;; usual bold current-card highlight.
               (with-selected-window win
                 (goto-char (car match))
-                (simply-kanban--highlight-card)
-                (simply-kanban--mark-card)))))
+                (simply-kanban--highlight-card)))))
         ;; Keep focus in the Org buffer, even when we had to create the board.
         (when (window-live-p orig-win)
           (select-window orig-win))))))
@@ -1359,36 +1343,6 @@ share the same `simply-kanban-marker' text property."
             (overlay-put ov 'priority 100)
             (push ov simply-kanban--highlight-overlays)))))))
 
-(defun simply-kanban--clear-mark ()
-  "Remove the temporary card-fill overlays left by `simply-kanban-show-card'."
-  (mapc #'delete-overlay simply-kanban--mark-overlays)
-  (setq simply-kanban--mark-overlays nil
-        simply-kanban--mark-marker nil))
-
-(defun simply-kanban--mark-card ()
-  "Fill every region of the card at point with `simply-kanban-mark'.
-Flags the card matching the Org heading for `simply-kanban-show-card';
-`simply-kanban--clear-mark-on-move' removes the fill once point leaves it.
-The fill sits above the focus highlight, so it shows even on the current card."
-  (simply-kanban--clear-mark)
-  (let ((card (get-text-property (point) 'simply-kanban-marker)))
-    (when card
-      (setq simply-kanban--mark-marker card)
-      (dolist (region (simply-kanban--card-regions card))
-        (let ((ov (make-overlay (car region) (cdr region))))
-          (overlay-put ov 'face 'simply-kanban-mark)
-          (overlay-put ov 'priority 101)
-          (push ov simply-kanban--mark-overlays))))))
-
-(defun simply-kanban--clear-mark-on-move ()
-  "Clear the temporary card fill when point is off the flagged card.
-Installed on `post-command-hook' so the cue set by `simply-kanban-show-card'
-persists only until you navigate to another card."
-  (when (and simply-kanban--mark-overlays
-             (not (simply-kanban--same-card-p (simply-kanban--marker-at-point)
-                                              simply-kanban--mark-marker)))
-    (simply-kanban--clear-mark)))
-
 ;;; Mode
 
 (defvar simply-kanban-mode-map
@@ -1479,8 +1433,7 @@ Uses the plain header-line foreground so it reads well on any theme."
           (:eval (propertize "#" 'face 'help-key-binding)) " sprint  "
           (:eval (propertize "S" 'face 'help-key-binding)) " sprint-filter  "
           (:eval (propertize "q" 'face 'help-key-binding)) " quit"))
-  (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t)
-  (add-hook 'post-command-hook #'simply-kanban--clear-mark-on-move nil t))
+  (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t))
 
 ;;; Transient menu
 
