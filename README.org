@@ -64,6 +64,7 @@ A header-line shows the source and the key reminders.  Columns expand to fill th
 | =;=       | set the Org effort estimate on the card at point     |
 | =#=       | set the sprint (=SPRINT= property) on the card        |
 | =e= / =E= | toggle the body of the card / every card             |
+| =l=       | set the max card-title length (empty = no limit)     |
 | =F=       | toggle follow mode (show heading as you move)        |
 | =B=       | switch board (multi-board files only)                |
 | =g=       | refresh                                              |
@@ -131,6 +132,7 @@ Set the sprint shown by default with =simply-kanban-default-sprint= (default =ni
 
 - =simply-kanban-min-column-width= (default 24) — columns expand to fill the window but never go narrower than this.
 - =simply-kanban-column-gap= (default 2) — spaces between columns.
+- =simply-kanban-max-title-length= (default =nil=) — when an integer, truncate card titles longer than this with an ellipsis; =nil= shows them in full.  Expanding a card (=e=) restores its full title alongside the body, and =l= adjusts the limit live for the current board.
 - =simply-kanban-buffer-name= — name of the board buffer.
 - =simply-kanban-auto-refresh= (default =t=) — refresh the board automatically whenever its source Org buffer is saved.
 - =simply-kanban-sort-by-priority= (default =nil=) — when non-nil, sort cards within each column by priority (A > B > C > none).

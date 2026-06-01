@@ -717,5 +717,54 @@ BODY runs with `board' current."
         (when (get-buffer simply-kanban-buffer-name)
           (kill-buffer simply-kanban-buffer-name))))))
 
+(ert-deftest sk-test-truncate-title ()
+  "`--truncate-title' shortens long titles unless the card is expanded."
+  (let ((simply-kanban--title-length 5))
+    ;; Long title is cut to the limit with an ellipsis ...
+    (should (string= (simply-kanban--truncate-title "abcdefgh" nil) "abcde…"))
+    ;; ... unless the card is expanded ...
+    (should (string= (simply-kanban--truncate-title "abcdefgh" t) "abcdefgh"))
+    ;; ... and short titles are left alone.
+    (should (string= (simply-kanban--truncate-title "abc" nil) "abc")))
+  ;; No limit means no change.
+  (let ((simply-kanban--title-length nil))
+    (should (string= (simply-kanban--truncate-title "abcdefgh" nil) "abcdefgh"))))
+
+(ert-deftest sk-test-title-length-renders-truncated ()
+  "A long title renders truncated on the board, in full once expanded."
+  (sk-test-with-board
+      "#+TODO: TODO | DONE\n\n* TODO A very long card title indeed\n"
+    (setq simply-kanban--title-length 8)
+    (simply-kanban-refresh)
+    (goto-char (point-min))
+    (should (re-search-forward "A very l…" nil t))
+    ;; Expanding the card reveals the full title.
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (simply-kanban-toggle-expand)
+    (goto-char (point-min))
+    (should (re-search-forward "long card title" nil t))))
+
+(ert-deftest sk-test-set-title-length-command ()
+  "`simply-kanban-set-title-length' updates the board's limit live."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Some lengthy heading\n"
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "4")))
+      (simply-kanban-set-title-length))
+    (should (= simply-kanban--title-length 4))
+    (goto-char (point-min))
+    (should (re-search-forward "Some…" nil t))
+    ;; Empty input clears the limit.
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "")))
+      (simply-kanban-set-title-length))
+    (should-not simply-kanban--title-length)
+    (goto-char (point-min))
+    (should (re-search-forward "Some lengthy heading" nil t))))
+
+(ert-deftest sk-test-set-title-length-rejects-nonpositive ()
+  "`simply-kanban-set-title-length' refuses zero or negative lengths."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Heading\n"
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "0")))
+      (should-error (simply-kanban-set-title-length) :type 'user-error))))
+
 (provide 'simply-kanban-tests)
 ;;; simply-kanban-tests.el ends here

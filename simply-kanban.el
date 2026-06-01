@@ -60,6 +60,7 @@
 ;;   #              set the sprint (SPRINT property) on the card at point
 ;;   e              toggle the body of the card at point
 ;;   E              toggle the body of every card
+;;   l              set the max card-title length (empty = no limit)
 ;;   F              toggle follow mode
 ;;   B              switch board (multi-board files only)
 ;;   g              refresh
@@ -91,6 +92,16 @@ Columns otherwise expand to fill the board window, divided evenly."
 (defcustom simply-kanban-column-gap 2
   "Number of spaces between columns."
   :type 'integer
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-max-title-length nil
+  "Maximum number of characters of a card title shown on the board, or nil.
+When an integer, titles longer than this are truncated with an ellipsis so the
+board stays compact; the full title is restored when the card is expanded with
+\\[simply-kanban-toggle-expand] (alongside its body text).  Adjust it live for
+the current board with \\[simply-kanban-set-title-length] when it feels too
+verbose."
+  :type '(choice (const :tag "No limit" nil) integer)
   :group 'simply-kanban)
 
 (defcustom simply-kanban-buffer-name "*Simply Kanban*"
@@ -256,6 +267,11 @@ A card's sprint is its `SPRINT' property.  Initialised from
 
 (defvar-local simply-kanban--expanded-cards nil
   "Markers of cards whose Org body is currently shown on the board.")
+
+(defvar-local simply-kanban--title-length nil
+  "Maximum characters of a card title shown on this board, or nil for no limit.
+Initialised from `simply-kanban-max-title-length' when the board opens; change
+it live with \\[simply-kanban-set-title-length].")
 
 (defvar simply-kanban--multi-source nil
   "Bound non-nil while rendering a board that spans more than one file.
@@ -523,22 +539,34 @@ Returns nil when EFFORT is empty or cannot be parsed."
                 tasks :initial-value 0)))
     (when (> total 0) (simply-kanban--format-effort total))))
 
+(defun simply-kanban--truncate-title (title expanded)
+  "Return TITLE shortened to `simply-kanban--title-length' characters.
+Returns TITLE unchanged when EXPANDED is non-nil, when no limit is set, or when
+it already fits; otherwise it is cut to the limit with an ellipsis appended."
+  (let ((limit simply-kanban--title-length))
+    (if (and limit (not expanded) (> (length title) limit))
+        (concat (substring title 0 limit) "…")
+      title)))
+
 (defun simply-kanban--format-card (task width)
   "Return compact card lines for TASK fitting WIDTH.
 A card shows its title prefixed by a priority cookie when one is set, then
 its tags (when any), its sprint (when no sprint filter is active), its effort
 estimate, and -- in an aggregated board -- its board (when showing all boards
-in a file) or source file.  When the card is expanded (see
-`simply-kanban--expanded-cards') the Org body follows below a divider."
+in a file) or source file.  The title is truncated to
+`simply-kanban--title-length' unless the card is expanded.  When the card is
+expanded (see `simply-kanban--expanded-cards') the full title is shown and the
+Org body follows below a divider."
   (let* ((inner (max 1 (- width 4)))
          (keyword (plist-get task :keyword))
          (border-face (simply-kanban--keyword-face keyword))
          (prio (plist-get task :priority))
          (prio-cookie (pcase prio (?A "[#A]") (?B "[#B]") (?C "[#C]") (_ nil)))
-         (title (or (plist-get task :title) ""))
+         (marker (plist-get task :marker))
+         (expanded (simply-kanban--card-expanded-p marker))
+         (title (simply-kanban--truncate-title (or (plist-get task :title) "") expanded))
          (title-text (if prio-cookie (concat prio-cookie " " title) title))
          (title-lines (simply-kanban--wrap title-text inner))
-         (marker (plist-get task :marker))
          (tags (plist-get task :tags))
          (tags-lines (when tags
                        (simply-kanban--wrap
@@ -561,8 +589,7 @@ in a file) or source file.  When the card is expanded (see
          (file-line (when simply-kanban--multi-source
                       (propertize (concat "» " (or (plist-get task :file) "org"))
                                   'face 'shadow)))
-         (body (and (simply-kanban--card-expanded-p marker)
-                    (plist-get task :body)))
+         (body (and expanded (plist-get task :body)))
          (box (lambda (s)
                 (concat (propertize "│" 'face border-face)
                         " "
@@ -1065,6 +1092,30 @@ clears the filter and shows every sprint."
   (simply-kanban-refresh)
   (message "Cleared sprint filter"))
 
+(defun simply-kanban-set-title-length ()
+  "Set the maximum displayed card-title length for the current board.
+Prompts for a number of characters; empty input removes the limit and shows
+titles in full.  Affects only this board (the default is
+`simply-kanban-max-title-length').  Truncated titles are restored in full when
+a card is expanded with \\[simply-kanban-toggle-expand]."
+  (interactive)
+  (unless (derived-mode-p 'simply-kanban-mode)
+    (user-error "Not in a kanban board"))
+  (let ((input (string-trim (read-string "Max title length (empty = no limit): "))))
+    (cond
+     ((string-empty-p input)
+      (setq simply-kanban--title-length nil))
+     ((string-match-p "\\`[0-9]+\\'" input)
+      (let ((n (string-to-number input)))
+        (when (<= n 0)
+          (user-error "Title length must be a positive number"))
+        (setq simply-kanban--title-length n)))
+     (t (user-error "Title length must be a whole number")))
+    (simply-kanban-refresh)
+    (if simply-kanban--title-length
+        (message "Title length: %d" simply-kanban--title-length)
+      (message "Title length: unlimited"))))
+
 (defun simply-kanban-delete ()
   "Delete the Org heading for the card at point."
   (interactive)
@@ -1110,7 +1161,7 @@ board card's source marker.  Empty when point precedes the first heading."
       (nreverse markers))))
 
 (defun simply-kanban--org-board-spec ()
-  "Return a board spec for the current Org buffer that holds every card.
+  "Return a board spec covering every card of the current Org buffer.
 A flat file yields the whole-buffer board; a multi-board file yields the
 all-boards aggregate, so the heading at point is present whichever board it
 belongs to.  Must be called with the Org buffer current."
@@ -1330,7 +1381,7 @@ The fill sits above the focus highlight, so it shows even on the current card."
           (push ov simply-kanban--mark-overlays))))))
 
 (defun simply-kanban--clear-mark-on-move ()
-  "Clear the temporary card fill once point leaves the flagged card.
+  "Clear the temporary card fill when point is off the flagged card.
 Installed on `post-command-hook' so the cue set by `simply-kanban-show-card'
 persists only until you navigate to another card."
   (when (and simply-kanban--mark-overlays
@@ -1365,6 +1416,7 @@ persists only until you navigate to another card."
     (define-key map (kbd "e") #'simply-kanban-toggle-expand)
     (define-key map (kbd "E") #'simply-kanban-toggle-expand-all)
     (define-key map (kbd "B") #'simply-kanban-switch-board)
+    (define-key map (kbd "l") #'simply-kanban-set-title-length)
     (define-key map (kbd "g") #'simply-kanban-refresh)
     (define-key map (kbd "SPC") #'simply-kanban-transient)
     (define-key map (kbd "?") #'simply-kanban-transient)
@@ -1470,6 +1522,7 @@ Uses the plain header-line foreground so it reads well on any theme."
     ("S" "filter by sprint" simply-kanban-set-sprint-filter)
     ("C" "clear sprint"     simply-kanban-clear-sprint-filter :transient t)
     ("B" "switch board"     simply-kanban-switch-board)
+    ("l" "title length"     simply-kanban-set-title-length)
     ("g" "refresh"          simply-kanban-refresh :transient t)
     ("q" "quit board"       quit-window)]])
 
@@ -1480,7 +1533,8 @@ The buffer is displayed before rendering so columns size to the window."
     (with-current-buffer buffer
       (unless (derived-mode-p 'simply-kanban-mode)
         (simply-kanban-mode))
-      (setq simply-kanban--sprint-filter simply-kanban-default-sprint))
+      (setq simply-kanban--sprint-filter simply-kanban-default-sprint
+            simply-kanban--title-length simply-kanban-max-title-length))
     (pop-to-buffer buffer)
     (simply-kanban--render spec)))
 

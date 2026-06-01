@@ -11,6 +11,8 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 ** TODO set depth of items
 
+** TODO transient on single row
+
 ** DOING reflect from org file to kanban
 
 ** DOING truncate todo title length
