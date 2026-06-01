@@ -1515,8 +1515,8 @@ Uses the plain header-line foreground so it reads well on any theme."
     ("v" "other window"     simply-kanban-jump-other-window)
     ("e" "expand card"      simply-kanban-toggle-expand :transient t)
     ("E" "expand all"       simply-kanban-toggle-expand-all :transient t)
-    ("F" "follow mode"      simply-kanban-toggle-follow :transient t)]]
-  [["Board"
+    ("F" "follow mode"      simply-kanban-toggle-follow :transient t)]
+   ["Board"
     ("t" "filter by tag"    simply-kanban-set-tag-filter)
     ("T" "clear tag filter" simply-kanban-clear-tag-filter :transient t)
     ("S" "filter by sprint" simply-kanban-set-sprint-filter)
