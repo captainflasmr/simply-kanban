@@ -9,6 +9,15 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
+** TODO squished heading line
+
+TODO (9) [21d 0:   DOING (8) [7d 0:   REVIEW (0)         DONE (64) [1d 0:   CLOSED (0)
+─────────────────  ─────────────────  ─────────────────  ─────────────────  ─────────────────
+                                                                                             
+┌───────────────┐  ┌───────────────┐                     ┌───────────────┐                   
+│ Add CUIS      │  │ Phase 2:      │                     │ Phase 0:      │                   
+
+
 ** TODO set depth of items
 
 * Issues
