@@ -253,11 +253,31 @@
         (progn
           (simply-kanban-add-note)
           (should (eq org-log-note-purpose 'note))
-          (should (eq (marker-buffer org-log-note-marker) src)))
-      (setq org-log-note-purpose nil)
+          (should (eq (marker-buffer org-log-note-marker) src))
+          (should (eq simply-kanban--note-board board))
+          (should (simply-kanban--same-card-p
+                   simply-kanban--note-card
+                   (simply-kanban--marker-at-point))))
+      (setq org-log-note-purpose nil
+            simply-kanban--note-card nil
+            simply-kanban--note-board nil)
       (when (markerp org-log-note-marker)
         (set-marker org-log-note-marker nil))
       (remove-hook 'post-command-hook 'org-add-log-note))))
+
+(ert-deftest sk-test-restore-card-after-note ()
+  "Storing a note restores point to the annotated card."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (simply-kanban-next-card)
+    (let ((card (simply-kanban--marker-at-point)))
+      (setq simply-kanban--note-card (copy-marker card)
+            simply-kanban--note-board (current-buffer))
+      (simply-kanban--org-store-log-note-around (lambda (&rest _) nil))
+      (should (simply-kanban--same-card-p
+               (simply-kanban--marker-at-point) card))
+      (should-not simply-kanban--note-card))))
 
 (ert-deftest sk-test-collect-remaining ()
   "`--collect-tasks' computes remaining time from effort and clock entries."

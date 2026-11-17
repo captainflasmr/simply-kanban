@@ -158,7 +158,7 @@ Clock commands save the source buffer when =simply-kanban-save-after-change= is 
 
 * Notes and logbook
 
-Press =N= on a card to add a timestamped note with Org's native note prompt (=org-add-note=); finish with =C-c C-c=. The note is stored on the card's heading, honouring =org-log-into-drawer=, and boards built from that Org buffer refresh once the note is stored. Press =L= to toggle the card's =LOGBOOK= drawer on the board, showing its clock entries and any notes stored in the drawer below a =Logbook= divider. The body shown by =e= includes notes and prose but omits =LOGBOOK= clock entries; notes stored outside the drawer remain part of that body.
+Press =N= on a card to add a timestamped note with Org's native note prompt (=org-add-note=); finish with =C-c C-c=. The board stays visible while the note is written: the source Org buffer and the =*Org Note*= buffer open in side windows, and the board returns to the same card after storing or cancelling. The note is stored on the card's heading, honouring =org-log-into-drawer=, and boards built from that Org buffer refresh once the note is stored. Press =L= to toggle the card's =LOGBOOK= drawer on the board, showing its clock entries and any notes stored in the drawer below a =Logbook= divider. The body shown by =e= includes notes and prose but omits =LOGBOOK= clock entries; notes stored outside the drawer remain part of that body.
 
 * Column progress
 

@@ -1372,19 +1372,70 @@ Candidates are the keywords of the card's own Org file."
         (simply-kanban-clock-out)
       (simply-kanban-clock-in))))
 
+(defvar simply-kanban--note-card nil
+  "Marker for the card whose Org note is being edited, or nil.")
+
+(defvar simply-kanban--note-board nil
+  "Board buffer that initiated the current Org note, or nil.")
+
+(defun simply-kanban--display-note-buffer (buffer alist)
+  "Display note BUFFER without hiding the kanban board.
+ALIST is passed to `display-buffer-in-side-window'."
+  (if (string= (buffer-name buffer) "*Org Note*")
+      (display-buffer-in-side-window
+       buffer
+       (append '((side . bottom) (slot . 0) (window-height . 0.3))
+               alist))
+    (display-buffer-in-side-window
+     buffer
+     (append '((side . right) (slot . 0) (window-width . 0.4))
+             alist))))
+
+(defun simply-kanban--org-add-log-note-around (orig &rest args)
+  "Call ORIG with ARGS, displaying note buffers beside the kanban board."
+  (if simply-kanban--note-card
+      (let ((display-buffer-overriding-action
+             (list (cons #'simply-kanban--display-note-buffer nil))))
+        (apply orig args))
+    (apply orig args)))
+
+(defun simply-kanban--org-store-log-note-around (orig &rest args)
+  "Call ORIG with ARGS and restore the annotated kanban card afterwards."
+  (unwind-protect
+      (apply orig args)
+    (when simply-kanban--note-card
+      (let ((card simply-kanban--note-card)
+            (board simply-kanban--note-board))
+        (setq simply-kanban--note-card nil
+              simply-kanban--note-board nil)
+        (when (and (buffer-live-p board) (marker-buffer card))
+          (with-current-buffer board
+            (simply-kanban-refresh)
+            (simply-kanban--goto-marker card)))))))
+
 (defun simply-kanban-add-note ()
   "Add a timestamped note to the card at point with Org's note prompt.
-The note is stored with `org-add-note' on the card's heading; boards built
-from that Org buffer refresh once the note is stored."
+The board stays visible while the note is written, and returns to the
+same card once the note is stored or cancelled."
   (interactive)
   (let ((marker (simply-kanban--marker-at-point)))
     (unless (and marker (buffer-live-p (marker-buffer marker)))
       (user-error "Point is not on a card"))
-    (with-current-buffer (marker-buffer marker)
-      (org-with-wide-buffer
-       (goto-char marker)
-       (org-back-to-heading t)
-       (org-add-note)))))
+    (setq simply-kanban--note-card (copy-marker marker)
+          simply-kanban--note-board (current-buffer))
+    (condition-case err
+        (with-current-buffer (marker-buffer marker)
+          (org-with-wide-buffer
+           (goto-char marker)
+           (org-back-to-heading t)
+           (org-add-note)))
+      (error
+       (setq simply-kanban--note-card nil
+             simply-kanban--note-board nil)
+       (signal (car err) (cdr err))))))
+
+(advice-add 'org-add-log-note :around #'simply-kanban--org-add-log-note-around)
+(advice-add 'org-store-log-note :around #'simply-kanban--org-store-log-note-around)
 
 (defun simply-kanban-set-tag-filter ()
   "Filter the board to show only cards with a given tag."
@@ -1623,13 +1674,10 @@ Installed buffer-locally on each source buffer's `after-save-hook'."
       (simply-kanban-refresh))))
 
 (defun simply-kanban--after-note-stored ()
-  "Save the source and refresh boards after an Org note is stored.
+  "Save the source buffer after an Org note is stored.
 Runs from `org-after-note-stored-hook' in the source Org buffer."
   (when (simply-kanban--boards-for (current-buffer))
-    (simply-kanban--maybe-save (current-buffer))
-    (dolist (board (simply-kanban--boards-for (current-buffer)))
-      (with-current-buffer board
-        (simply-kanban-refresh)))))
+    (simply-kanban--maybe-save (current-buffer))))
 
 (add-hook 'org-after-note-stored-hook #'simply-kanban--after-note-stored)
 
