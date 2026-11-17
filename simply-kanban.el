@@ -70,6 +70,8 @@
 ;;; Code:
 
 (require 'org)
+(require 'org-clock)
+(require 'org-duration)
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
@@ -124,6 +126,36 @@ verbose."
 The estimate is read from the card heading's `Effort' property (the value
 Org's \\[org-set-effort] sets); cards without one show nothing.  The column
 header then appends the summed effort of its cards in brackets."
+  :type 'boolean
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-show-clock t
+  "When non-nil, show each card's clocked time from its Org clock entries.
+A card shows a `Clocked: H:MM' badge when it has clocked time or a running
+clock.  The active clock is included while it runs, and is marked as
+`(run)'.  Set this to nil to omit clock data entirely."
+  :type 'boolean
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-show-clock-total nil
+  "When non-nil, append each column's summed clocked time to its header.
+The total is shown in braces after the effort total, and requires
+`simply-kanban-show-clock' to be non-nil."
+  :type 'boolean
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-show-remaining t
+  "When non-nil, show the estimated time remaining on started cards.
+Remaining is the card's Effort minus its clocked time, floored at zero.
+Cards with no Effort or no clocked time show no remaining badge.  Requires
+`simply-kanban-show-clock' to be non-nil."
+  :type 'boolean
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-show-remaining-total nil
+  "When non-nil, append each column's summed remaining time to its header.
+The total is shown in angle brackets after the effort and clock totals, and
+requires `simply-kanban-show-clock' and `simply-kanban-show-remaining'."
   :type 'boolean
   :group 'simply-kanban)
 
@@ -193,6 +225,16 @@ height other than 1.0, which would break the board's monospace alignment."
 (defface simply-kanban-effort
   '((t :inherit org-special-keyword))
   "Face for the effort estimate badge shown on a card and column total."
+  :group 'simply-kanban)
+
+(defface simply-kanban-clock
+  '((t :inherit org-special-keyword))
+  "Face for the clocked-time badge shown on a card."
+  :group 'simply-kanban)
+
+(defface simply-kanban-remaining
+  '((t :inherit org-special-keyword))
+  "Face for the remaining-time badge shown on a card."
   :group 'simply-kanban)
 
 (defface simply-kanban-sprint
@@ -297,12 +339,50 @@ board container) applies to its cards.  Non-numeric values yield nil."
     (when (and s (string-match-p "\\`[ \t]*[0-9]+[ \t]*\\'" s))
       (string-to-number s))))
 
+(defun simply-kanban--active-clock-heading-position ()
+  "Return the position of the heading with the running clock, or nil."
+  (when (and (org-clock-is-active)
+             (markerp org-clock-marker)
+             (marker-buffer org-clock-marker))
+    (with-current-buffer (marker-buffer org-clock-marker)
+      (save-excursion
+        (goto-char org-clock-marker)
+        (ignore-errors (org-back-to-heading t))
+        (when (org-at-heading-p) (point))))))
+
+(defun simply-kanban--clocking-p ()
+  "Return non-nil when the heading at point has the running clock."
+  (let ((pos (simply-kanban--active-clock-heading-position)))
+    (and pos
+         (eq (marker-buffer org-clock-marker) (current-buffer))
+         (= pos (point)))))
+
+(defun simply-kanban--card-clocking-p (marker)
+  "Return non-nil when the card at MARKER has the running clock."
+  (let ((pos (simply-kanban--active-clock-heading-position)))
+    (and pos
+         marker
+         (marker-buffer marker)
+         (eq (marker-buffer org-clock-marker) (marker-buffer marker))
+         (= pos (marker-position marker)))))
+
+(defun simply-kanban--clocked-minutes ()
+  "Return clocked minutes for the heading at point.
+The value includes the currently running clock interval, if any."
+  (if (simply-kanban--clocking-p)
+      (round (org-clock-get-clocked-time))
+    (or (get-text-property (point) :org-clock-minutes) 0)))
+
 (defun simply-kanban--collect-tasks (buffer &optional restrict)
   "Collect TODO entries from Org BUFFER as a list of card plists.
-Each plist has :keyword :title :body :priority :tags :effort :sprint :file
-:board :marker.  :sprint is the heading's `SPRINT' property as an integer (nil
-when unset or non-numeric), inherited from parent headings.  :board is filled
-in only by `simply-kanban--collect-boards'.
+Each plist has :keyword :title :body :priority :tags :effort :clocked
+:clocking :remaining :done :sprint :file :board :marker.  :clocked is the
+heading's clocked minutes (including a running clock) and :clocking is
+non-nil for the active clock.  :remaining is the estimate left after clocked
+time, and :done is non-nil for a done keyword.  :sprint is the heading's
+`SPRINT' property as an integer (nil when unset or non-numeric), inherited
+from parent headings.  :board is filled in only by
+`simply-kanban--collect-boards'.
 RESTRICT limits which entries become cards:
   nil          -- every TODO heading in the buffer;
   a marker     -- only TODO headings in that heading's subtree;
@@ -313,20 +393,34 @@ RESTRICT limits which entries become cards:
                   (buffer-name)))
           tasks)
       (org-with-wide-buffer
+       (when simply-kanban-show-clock (save-excursion (org-clock-sum)))
        (let ((collect
               (lambda ()
                 (let ((kw (org-get-todo-state)))
                   (when (and kw
                              (or (not (eq restrict 'toplevel))
                                  (= (org-current-level) 1)))
-                    (let ((comps (org-heading-components)))
+                    (let* ((comps (org-heading-components))
+                           (effort (org-entry-get nil "Effort"))
+                           (clocked (and simply-kanban-show-clock
+                                         (simply-kanban--clocked-minutes)))
+                           (done (and kw (member kw org-done-keywords) t))
+                           (remaining (and simply-kanban-show-clock
+                                           simply-kanban-show-remaining
+                                           (simply-kanban--remaining-minutes
+                                            effort clocked done))))
                       (push (list :keyword kw
                                   :title (substring-no-properties
                                           (or (org-get-heading t t t t) ""))
                                   :body (simply-kanban--entry-body)
                                   :priority (nth 3 comps)
                                   :tags (org-get-tags nil t)
-                                  :effort (org-entry-get nil "Effort")
+                                  :effort effort
+                                  :clocked clocked
+                                  :clocking (and simply-kanban-show-clock
+                                                 (simply-kanban--clocking-p))
+                                  :remaining remaining
+                                  :done done
                                   :sprint (simply-kanban--read-sprint)
                                   :file file
                                   :board nil
@@ -510,11 +604,38 @@ Returns nil when EFFORT is empty or cannot be parsed."
              (fboundp 'org-duration-to-minutes))
     (ignore-errors (org-duration-to-minutes effort))))
 
+(defun simply-kanban--remaining-minutes (effort clocked done)
+  "Return remaining minutes for EFFORT, CLOCKED, and DONE.
+EFFORT is an Org duration string and CLOCKED is minutes.  Returns nil when
+EFFORT is missing or invalid.  A DONE task has zero remaining minutes;
+otherwise the result is EFFORT minus CLOCKED, floored at zero."
+  (let ((effort-minutes (simply-kanban--effort-minutes effort)))
+    (when effort-minutes
+      (if done
+          0
+        (max 0 (- effort-minutes (or clocked 0)))))))
+
 (defun simply-kanban--format-effort (minutes)
   "Return MINUTES formatted as an Org duration string."
   (if (fboundp 'org-duration-from-minutes)
       (org-duration-from-minutes minutes)
     (format "%dm" (round minutes))))
+
+(defun simply-kanban--format-jira-duration (minutes)
+  "Return MINUTES formatted as a Jira-style duration such as \"1d 3h 42m\".
+The day length comes from `org-duration-units'.  Zero components are omitted;
+zero minutes is \"0m\"."
+  (let* ((day (max 1 (round (or (cdr (assoc "d" org-duration-units)) 1440))))
+         (total (max 0 (round (or minutes 0))))
+         (days (/ total day))
+         (remainder (% total day))
+         (hours (/ remainder 60))
+         (mins (% remainder 60))
+         parts)
+    (when (> days 0) (push (format "%dd" days) parts))
+    (when (> hours 0) (push (format "%dh" hours) parts))
+    (when (or (> mins 0) (null parts)) (push (format "%dm" mins) parts))
+    (mapconcat #'identity (nreverse parts) " ")))
 
 (defun simply-kanban--column-effort (tasks)
   "Return the summed effort of TASKS as a duration string, or nil when none set."
@@ -523,6 +644,20 @@ Returns nil when EFFORT is empty or cannot be parsed."
                   (+ acc (or (simply-kanban--effort-minutes (plist-get tk :effort)) 0)))
                 tasks :initial-value 0)))
     (when (> total 0) (simply-kanban--format-effort total))))
+
+(defun simply-kanban--column-clock (tasks)
+  "Return the summed clocked time of TASKS, or nil when none is clocked."
+  (let ((total (cl-reduce (lambda (acc tk)
+                            (+ acc (or (plist-get tk :clocked) 0)))
+                          tasks :initial-value 0)))
+    (when (> total 0) (simply-kanban--format-effort total))))
+
+(defun simply-kanban--column-remaining (tasks)
+  "Return the summed remaining time of TASKS, or nil when none remains."
+  (let ((total (cl-reduce (lambda (acc tk)
+                            (+ acc (or (plist-get tk :remaining) 0)))
+                          tasks :initial-value 0)))
+    (when (> total 0) (simply-kanban--format-jira-duration total))))
 
 (defun simply-kanban--truncate-title (title expanded)
   "Return TITLE shortened to `simply-kanban--title-length' characters.
@@ -537,11 +672,11 @@ it already fits; otherwise it is cut to the limit with an ellipsis appended."
   "Return compact card lines for TASK fitting WIDTH.
 A card shows its title prefixed by a priority cookie when one is set, then
 its tags (when any), its sprint (when no sprint filter is active), its effort
-estimate, and -- in an aggregated board -- its board (when showing all boards
-in a file) or source file.  The title is truncated to
-`simply-kanban--title-length' unless the card is expanded.  When the card is
-expanded (see `simply-kanban--expanded-cards') the full title is shown and the
-Org body follows below a divider."
+estimate, its clocked and remaining time when present, and -- in an aggregated
+board -- its board (when showing all boards in a file) or source file.  The
+title is truncated to `simply-kanban--title-length' unless the card is
+expanded.  When the card is expanded (see `simply-kanban--expanded-cards') the
+full title is shown and the Org body follows below a divider."
   (let* ((inner (max 1 (- width 4)))
          (keyword (plist-get task :keyword))
          (border-face (simply-kanban--keyword-face keyword))
@@ -568,6 +703,25 @@ Org body follows below a divider."
          (effort-line (when (and effort (not (string-empty-p effort)))
                         (propertize (concat "Effort: " effort)
                                     'face 'simply-kanban-effort)))
+         (clocked (and simply-kanban-show-clock (plist-get task :clocked)))
+         (clocking (and simply-kanban-show-clock (plist-get task :clocking)))
+         (clock-line (when (and (or clocking (> (or clocked 0) 0)))
+                       (propertize
+                        (concat "Clocked: "
+                                (simply-kanban--format-effort (or clocked 0))
+                                (when clocking " (run)"))
+                        'face 'simply-kanban-clock)))
+         (remaining (and simply-kanban-show-remaining
+                         (plist-get task :remaining)))
+         (remaining-lines
+          (when (and remaining
+                     (or clocking (> (or clocked 0) 0)))
+            (simply-kanban--wrap
+             (propertize
+              (concat "Remaining: "
+                      (simply-kanban--format-jira-duration remaining))
+              'face 'simply-kanban-remaining)
+             inner)))
          (board-line (when simply-kanban--show-board
                        (let ((b (plist-get task :board)))
                          (when b (propertize (concat "▸ " b) 'face 'shadow)))))
@@ -595,6 +749,10 @@ Org body follows below a divider."
       (push (funcall box sprint-line) lines))
     (when effort-line
       (push (funcall box effort-line) lines))
+    (when clock-line
+      (push (funcall box clock-line) lines))
+    (dolist (rline remaining-lines)
+      (push (funcall box rline) lines))
     (when board-line
       (push (funcall box board-line) lines))
     (when file-line
@@ -633,8 +791,18 @@ Each returned string is exactly WIDTH columns wide."
          (header-face (simply-kanban--keyword-face keyword))
          (effort-total (and simply-kanban-show-effort
                             (simply-kanban--column-effort col-tasks)))
+         (clock-total (and simply-kanban-show-clock
+                           simply-kanban-show-clock-total
+                           (simply-kanban--column-clock col-tasks)))
+         (remaining-total (and simply-kanban-show-clock
+                               simply-kanban-show-remaining
+                               simply-kanban-show-remaining-total
+                               (simply-kanban--column-remaining col-tasks)))
          (header (propertize (concat (format " %s (%d)" keyword (length col-tasks))
-                                     (when effort-total (format " [%s]" effort-total)))
+                                     (when effort-total (format " [%s]" effort-total))
+                                     (when clock-total (format " {%s}" clock-total))
+                                     (when remaining-total
+                                       (format " <%s>" remaining-total)))
                              'face header-face
                              'simply-kanban-keyword keyword))
          (divider (propertize (make-string width ?─)
@@ -674,6 +842,15 @@ Each returned string is exactly WIDTH columns wide."
                (* (1- ncols) simply-kanban-column-gap))
             ncols))))
 
+(defun simply-kanban--inherit-duration-units (buffers)
+  "Set `org-duration-units' from the first live buffer in BUFFERS.
+This keeps duration badges on a board consistent with its source Org
+file's buffer-local units."
+  (let ((source (seq-find #'buffer-live-p buffers)))
+    (when source
+      (setq-local org-duration-units
+                  (buffer-local-value 'org-duration-units source)))))
+
 (defun simply-kanban--render (spec)
   "Render the kanban board described by SPEC into the current buffer.
 SPEC is resolved to a list of Org buffers via `simply-kanban--spec-buffers'.
@@ -707,8 +884,10 @@ Must be called with the board buffer current and its window selected."
          (keywords (simply-kanban--merge-keywords buffers))
          (width (simply-kanban--column-width (length keywords)))
          (gap (make-string simply-kanban-column-gap ?\s))
-         (columns (mapcar (lambda (kw) (simply-kanban--column-cells kw tasks width))
-                          keywords))
+         (columns (progn
+                    (simply-kanban--inherit-duration-units buffers)
+                    (mapcar (lambda (kw) (simply-kanban--column-cells kw tasks width))
+                            keywords)))
          (nrows (apply #'max 0 (mapcar #'length columns))))
     (erase-buffer)
     (setq simply-kanban--source-spec spec
@@ -1001,6 +1180,43 @@ Candidates are the keywords of the card's own Org file."
       (simply-kanban--maybe-save (marker-buffer marker))
       (simply-kanban-refresh)
       (simply-kanban--goto-marker marker))))
+
+(defun simply-kanban-clock-in ()
+  "Clock in the card at point."
+  (interactive)
+  (let ((marker (simply-kanban--marker-at-point)))
+    (unless (and marker (buffer-live-p (marker-buffer marker)))
+      (user-error "Point is not on a card"))
+    (with-current-buffer (marker-buffer marker)
+      (org-with-wide-buffer
+       (goto-char marker)
+       (org-back-to-heading t)
+       (org-clock-in)))
+    (simply-kanban--maybe-save (marker-buffer marker))
+    (simply-kanban-refresh)
+    (message "Clocked in")))
+
+(defun simply-kanban-clock-out ()
+  "Clock out the currently running Org clock."
+  (interactive)
+  (if (not (org-clock-is-active))
+      (message "No active clock")
+    (let ((buffer (marker-buffer org-clock-marker)))
+      (org-clock-out)
+      (when (buffer-live-p buffer)
+        (simply-kanban--maybe-save buffer))
+      (simply-kanban-refresh)
+      (message "Clocked out"))))
+
+(defun simply-kanban-toggle-clock ()
+  "Clock in the card at point, or clock it out if it is already running."
+  (interactive)
+  (let ((marker (simply-kanban--marker-at-point)))
+    (unless (and marker (buffer-live-p (marker-buffer marker)))
+      (user-error "Point is not on a card"))
+    (if (simply-kanban--card-clocking-p marker)
+        (simply-kanban-clock-out)
+      (simply-kanban-clock-in))))
 
 (defun simply-kanban-set-tag-filter ()
   "Filter the board to show only cards with a given tag."
@@ -1366,6 +1582,8 @@ share the same `simply-kanban-marker' text property."
     (define-key map (kbd ",") #'simply-kanban-set-priority)
     (define-key map (kbd ";") #'simply-kanban-set-effort)
     (define-key map (kbd "#") #'simply-kanban-set-sprint)
+    (define-key map (kbd "i") #'simply-kanban-clock-in)
+    (define-key map (kbd "o") #'simply-kanban-clock-out)
     (define-key map (kbd "F") #'simply-kanban-toggle-follow)
     (define-key map (kbd "e") #'simply-kanban-toggle-expand)
     (define-key map (kbd "E") #'simply-kanban-toggle-expand-all)
@@ -1423,6 +1641,12 @@ Uses the plain header-line foreground so it reads well on any theme."
                      (propertize (format "  [sprint: %d]" simply-kanban--sprint-filter)
                                  'face 'warning)
                    ""))
+          (:eval (when (org-clock-is-active)
+                   (propertize
+                    (format "  [clock: %s]"
+                            (org-duration-from-minutes
+                             (org-clock-get-clocked-time)))
+                    'face 'warning)))
           "   "
           (:eval (propertize "SPC" 'face 'help-key-binding)) " menu  "
           (:eval (propertize "{}" 'face 'help-key-binding)) " move  "
@@ -1430,6 +1654,7 @@ Uses the plain header-line foreground so it reads well on any theme."
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
           (:eval (propertize ":" 'face 'help-key-binding)) " tags  "
           (:eval (propertize ";" 'face 'help-key-binding)) " effort  "
+          (:eval (propertize "i/o" 'face 'help-key-binding)) " clock  "
           (:eval (propertize "#" 'face 'help-key-binding)) " sprint  "
           (:eval (propertize "S" 'face 'help-key-binding)) " sprint-filter  "
           (:eval (propertize "q" 'face 'help-key-binding)) " quit"))
@@ -1466,6 +1691,9 @@ Uses the plain header-line foreground so it reads well on any theme."
     (";" "set effort"      simply-kanban-set-effort)
     ("#" "set sprint"      simply-kanban-set-sprint)
     ("k" "delete card"     simply-kanban-delete)]
+   ["Clock"
+    ("i" "clock in"        simply-kanban-clock-in)
+    ("o" "clock out"       simply-kanban-clock-out)]
    ["Reveal"
     ("RET" "reveal heading" simply-kanban-goto)
     ("v" "other window"     simply-kanban-jump-other-window)

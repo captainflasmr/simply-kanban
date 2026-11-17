@@ -109,6 +109,113 @@
     (should (cl-some (lambda (l) (string-match-p "1:00" l)) with))
     (should-not (cl-some (lambda (l) (string-match-p "1:00" l)) without))))
 
+(ert-deftest sk-test-collect-clocked ()
+  "`--collect-tasks' reads clock entries into `:clocked' as minutes."
+  (sk-test-with-org (concat "* TODO Parser\n"
+                            ":LOGBOOK:\n"
+                            "CLOCK: [2024-01-01 Mon 09:00]--[2024-01-01 Mon 10:00] =>  1:00\n"
+                            ":END:\n"
+                            "* TODO Render\n")
+    (let ((tasks (simply-kanban--collect-tasks src)))
+      (should (= 60 (plist-get (car tasks) :clocked)))
+      (should (= 0 (plist-get (cadr tasks) :clocked))))))
+
+(ert-deftest sk-test-column-clock ()
+  "`--column-clock' sums the cards' clocked minutes as a duration."
+  (should (string= (simply-kanban--column-clock
+                    (list (list :clocked 90) (list :clocked 30)
+                          (list :clocked nil)))
+                   "2:00"))
+  (should (null (simply-kanban--column-clock
+                 (list (list :clocked 0) (list :clocked nil))))))
+
+(ert-deftest sk-test-format-card-shows-clock ()
+  "A card with clocked time renders a badge; a running clock is marked."
+  (let ((simply-kanban-show-clock t))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :clocked 90) 24)))
+      (should (cl-some (lambda (l) (string-match-p "Clocked: 1:30" l)) lines)))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :clocked 90 :clocking t) 28)))
+      (should (cl-some (lambda (l) (string-match-p "Clocked: 1:30 (run)" l))
+                       lines))))
+  (let ((simply-kanban-show-clock nil))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :clocked 90) 24)))
+      (should-not (cl-some (lambda (l) (string-match-p "Clocked:" l)) lines)))))
+
+(ert-deftest sk-test-remaining-minutes ()
+  "`--remaining-minutes' subtracts clocked time from the effort estimate."
+  (should (= 540 (simply-kanban--remaining-minutes "12:00" 180 nil)))
+  (should (= 0 (simply-kanban--remaining-minutes "12:00" 900 nil)))
+  (should (= 0 (simply-kanban--remaining-minutes "12:00" 0 t)))
+  (should (null (simply-kanban--remaining-minutes nil 60 nil))))
+
+(ert-deftest sk-test-collect-remaining ()
+  "`--collect-tasks' computes remaining time from effort and clock entries."
+  (sk-test-with-org (concat "* TODO Parser\n"
+                            ":PROPERTIES:\n:Effort:   2:00\n:END:\n"
+                            ":LOGBOOK:\n"
+                            "CLOCK: [2024-01-01 Mon 09:00]--[2024-01-01 Mon 10:00] =>  1:00\n"
+                            ":END:\n")
+    (let ((task (car (simply-kanban--collect-tasks src))))
+      (should (= 60 (plist-get task :remaining)))
+      (should-not (plist-get task :done)))))
+
+(ert-deftest sk-test-column-remaining ()
+  "`--column-remaining' sums the cards' remaining minutes as a duration."
+  (should (string= (simply-kanban--column-remaining
+                    (list (list :remaining 90) (list :remaining 30)
+                          (list :remaining nil)))
+                   "2h"))
+  (should (null (simply-kanban--column-remaining
+                 (list (list :remaining 0) (list :remaining nil))))))
+
+(ert-deftest sk-test-format-jira-duration ()
+  "Remaining time renders with Jira-style day/hour/minute units."
+  (let ((org-duration-units '(("min" . 1) ("h" . 60) ("d" . 444))))
+    (should (string= (simply-kanban--format-jira-duration 666) "1d 3h 42m"))
+    (should (string= (simply-kanban--format-jira-duration 444) "1d"))
+    (should (string= (simply-kanban--format-jira-duration 42) "42m"))
+    (should (string= (simply-kanban--format-jira-duration 0) "0m"))))
+
+(ert-deftest sk-test-board-inherits-duration-units ()
+  "A board formats durations with its source buffer's duration units."
+  (sk-test-with-org (concat "#+TODO: TODO | DONE\n\n"
+                            "* TODO Parser\n"
+                            ":PROPERTIES:\n:Effort:   2d\n:END:\n"
+                            ":LOGBOOK:\n"
+                            "CLOCK: [2024-01-01 Mon 09:00]--[2024-01-01 Mon 09:01] =>  0:01\n"
+                            ":END:\n")
+    (setq-local org-duration-units '(("min" . 1) ("h" . 60) ("d" . 444)))
+    (let ((board (get-buffer-create "*sk-units-board*")))
+      (unwind-protect
+          (with-current-buffer board
+            (simply-kanban-mode)
+            (simply-kanban--render (cons 'buffer src))
+            (should (string-match-p "Remaining: 1d 7h 23m"
+                                    (buffer-string))))
+        (kill-buffer board)))))
+
+(ert-deftest sk-test-format-card-shows-remaining ()
+  "A started card shows remaining time; an unstarted card does not."
+  (let ((simply-kanban-show-remaining t))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :clocked 60
+                        :remaining 60) 24)))
+      (should (cl-some (lambda (l) (string-match-p "Remaining: 1h" l))
+                       lines)))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :remaining 60) 24)))
+      (should-not (cl-some (lambda (l) (string-match-p "Remaining:" l))
+                           lines))))
+  (let ((simply-kanban-show-remaining nil))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :clocked 60
+                        :remaining 60) 24)))
+      (should-not (cl-some (lambda (l) (string-match-p "Remaining:" l))
+                           lines)))))
+
 (ert-deftest sk-test-collect-boards ()
   "`--collect-boards' gathers every board's cards, tagging each with its :board."
   (sk-test-with-org (concat "* Project Alpha\n** TODO design\n** TODO build\n"
@@ -414,6 +521,8 @@ BODY runs with `board' current."
   (should (eq (lookup-key simply-kanban-mode-map "F") 'simply-kanban-toggle-follow))
   (should (eq (lookup-key simply-kanban-mode-map ";") 'simply-kanban-set-effort))
   (should (eq (lookup-key simply-kanban-mode-map "#") 'simply-kanban-set-sprint))
+  (should (eq (lookup-key simply-kanban-mode-map "i") 'simply-kanban-clock-in))
+  (should (eq (lookup-key simply-kanban-mode-map "o") 'simply-kanban-clock-out))
   (should (eq (lookup-key simply-kanban-mode-map "S") 'simply-kanban-set-sprint-filter))
   (should (eq (lookup-key simply-kanban-mode-map "n") 'simply-kanban-next-card)))
 
@@ -455,6 +564,40 @@ BODY runs with `board' current."
       (re-search-forward "Parser")
       (org-back-to-heading t)
       (should (string= (org-entry-get nil "Effort") "1:00")))))
+
+(ert-deftest sk-test-clock-in-out ()
+  "Clocking from a card updates Org and writes a CLOCK entry."
+  (sk-test-with-board "#+TODO: TODO DOING | DONE\n\n* TODO Parser\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (unwind-protect
+        (progn
+          (simply-kanban-clock-in)
+          (should (org-clock-is-active))
+          (with-current-buffer board
+            (should (string-match-p "Clocked: 0:00 (run)"
+                                    (buffer-string))))
+          (simply-kanban-clock-out)
+          (should-not (org-clock-is-active))
+          (with-current-buffer src
+            (goto-char (point-min))
+            (should (re-search-forward "CLOCK:" nil t))))
+      (when (org-clock-is-active)
+        (org-clock-out)))))
+
+(ert-deftest sk-test-toggle-clock ()
+  "Toggling clocking twice clocks the same card back out."
+  (sk-test-with-board "#+TODO: TODO DOING | DONE\n\n* TODO Parser\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (unwind-protect
+        (progn
+          (simply-kanban-toggle-clock)
+          (should (org-clock-is-active))
+          (simply-kanban-toggle-clock)
+          (should-not (org-clock-is-active)))
+      (when (org-clock-is-active)
+        (org-clock-out)))))
 
 ;;; Tag filtering
 
