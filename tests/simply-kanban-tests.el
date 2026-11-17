@@ -151,6 +151,49 @@
   (should (= 0 (simply-kanban--remaining-minutes "12:00" 0 t)))
   (should (null (simply-kanban--remaining-minutes nil 60 nil))))
 
+(ert-deftest sk-test-over-minutes ()
+  "`--over-minutes' reports clocked time beyond the effort estimate."
+  (should (= 180 (simply-kanban--over-minutes "12:00" 900)))
+  (should (= 0 (simply-kanban--over-minutes "12:00" 180)))
+  (should (= 60 (simply-kanban--over-minutes "1:00" 120)))
+  (should (null (simply-kanban--over-minutes nil 60))))
+
+(ert-deftest sk-test-collect-over ()
+  "`--collect-tasks' computes over-budget minutes from clock entries."
+  (sk-test-with-org (concat "* TODO Parser\n"
+                            ":PROPERTIES:\n:Effort:   1:00\n:END:\n"
+                            ":LOGBOOK:\n"
+                            "CLOCK: [2024-01-01 Mon 09:00]--[2024-01-01 Mon 10:30] =>  1:30\n"
+                            ":END:\n")
+    (let ((task (car (simply-kanban--collect-tasks src))))
+      (should (= 30 (plist-get task :over)))
+      (should (= 0 (plist-get task :remaining))))))
+
+(ert-deftest sk-test-column-over ()
+  "`--column-over' sums the cards' over-budget minutes as a duration."
+  (should (string= (simply-kanban--column-over
+                    (list (list :over 90) (list :over 30)
+                          (list :over nil)))
+                   "2h"))
+  (should (null (simply-kanban--column-over
+                 (list (list :over 0) (list :over nil))))))
+
+(ert-deftest sk-test-format-card-shows-over ()
+  "An over-budget card shows an Over badge instead of Remaining."
+  (let ((simply-kanban-show-remaining t))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :clocked 90
+                        :over 30 :remaining 0) 24)))
+      (should (cl-some (lambda (l) (string-match-p "Over: 30m" l)) lines))
+      (should-not (cl-some (lambda (l) (string-match-p "Remaining:" l))
+                           lines))))
+  (let ((simply-kanban-show-remaining nil))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :clocked 90
+                        :over 30 :remaining 0) 24)))
+      (should-not (cl-some (lambda (l) (string-match-p "Over:" l))
+                           lines)))))
+
 (ert-deftest sk-test-collect-remaining ()
   "`--collect-tasks' computes remaining time from effort and clock entries."
   (sk-test-with-org (concat "* TODO Parser\n"

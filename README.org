@@ -86,7 +86,7 @@ To rebind it, e.g.:
   (define-key org-mode-map (kbd "C-c k") #'simply-kanban-show-card))
 #+end_src
 
-Cards are deliberately compact so you can fit many per window: a card shows its title (prefixed by a priority cookie such as =[#A]= only when one is set), its tags when present, and its Org effort estimate as =Effort: 2:00= when the heading carries an =Effort= property.  In an aggregated board it also shows its source file (=» file=).  Press =;= to set the effort with Org's native prompt (=org-set-effort=); each column header then sums its cards' efforts in brackets (=[2:00]=), giving a Jira-style per-stage workload total.  Cards with clock entries also show =Clocked: 1:30=; a running clock adds =(run)=.  Once a card has clocked time it also shows =Remaining: 1d 3h 42m=, calculated as Effort minus clocked time (floored at zero).  Press =i= to clock in the card at point and =o= to clock out the running clock.  Set =simply-kanban-show-clock-total= to add each column's clocked total in braces (={1:30}=) after the effort total, and =simply-kanban-show-remaining-total= to add its remaining total in angle brackets (=<1d 3h 42m>=).  Press =e= to expand a card and show the heading's body text inline.  When you reveal a heading with =RET= (or while follow mode is on) the target heading line briefly pulses, and focus stays on the board.
+Cards are deliberately compact so you can fit many per window: a card shows its title (prefixed by a priority cookie such as =[#A]= only when one is set), its tags when present, and its Org effort estimate as =Effort: 2:00= when the heading carries an =Effort= property.  In an aggregated board it also shows its source file (=» file=).  Press =;= to set the effort with Org's native prompt (=org-set-effort=); each column header then sums its cards' efforts in brackets (=[2:00]=), giving a Jira-style per-stage workload total.  Cards with clock entries also show =Clocked: 1:30=; a running clock adds =(run)=.  Once a card has clocked time it also shows =Remaining: 1d 3h 42m=, calculated as Effort minus clocked time (floored at zero); a card whose clocked time exceeds its estimate instead shows =Over: 30m= in the warning face.  Press =i= to clock in the card at point and =o= to clock out the running clock.  Set =simply-kanban-show-clock-total= to add each column's clocked total in braces (={1:30}=) after the effort total, =simply-kanban-show-remaining-total= to add its remaining total in angle brackets (=<1d 3h 42m>=), and =simply-kanban-show-over-total= to add its over-budget total after an exclamation mark (=!30m=).  Press =e= to expand a card and show the heading's body text inline.  When you reveal a heading with =RET= (or while follow mode is on) the target heading line briefly pulses, and focus stays on the board.
 
 * Multiple boards in one file
 
@@ -143,12 +143,13 @@ Each row reports the sprint, task count, done count, effort-weighted progress, e
 
 * Clocking
 
-The board reads the source headings' Org clock entries, so time clocked anywhere in Org is visible on the cards.  Press =i= to clock in the card at point and =o= to clock out whichever task is running.  The active clock is shown in the header line, and its card displays =Clocked: 1:30 (run)=.  Started cards also show the time left, =Remaining: 1d 3h 42m=, calculated from the Effort estimate minus clocked time; a =DONE= card has zero remaining.  The day length in that format follows =org-duration-units= from the source Org buffer, so the project's 37-hour week renders one day as =7h24m= even when the board buffer itself is not visiting that file.
+The board reads the source headings' Org clock entries, so time clocked anywhere in Org is visible on the cards.  Press =i= to clock in the card at point and =o= to clock out whichever task is running.  The active clock is shown in the header line, and its card displays =Clocked: 1:30 (run)=.  Started cards also show the time left, =Remaining: 1d 3h 42m=, calculated from the Effort estimate minus clocked time; a =DONE= card has zero remaining, and a card whose clocked time exceeds its estimate shows =Over: 30m= instead.  The day length in that format follows =org-duration-units= from the source Org buffer, so the project's 37-hour week renders one day as =7h24m= even when the board buffer itself is not visiting that file.
 
 - =simply-kanban-show-clock= (default =t=) — show each card's clocked time and the active clock marker.
 - =simply-kanban-show-clock-total= (default =nil=) — append each column's summed clocked time in braces (={1:30}=) after its effort total.
 - =simply-kanban-show-remaining= (default =t=) — show remaining time on started cards.
 - =simply-kanban-show-remaining-total= (default =nil=) — append each column's summed remaining time in angle brackets (=<1d 3h 42m>=) after its effort total.
+- =simply-kanban-show-over-total= (default =nil=) — append each column's summed over-budget time after an exclamation mark (=!30m=).
 - Press =g= to refresh the displayed clock times; the board updates again after a status change, clock in/out, or source save.
 
 Clock commands save the source buffer when =simply-kanban-save-after-change= is non-nil, matching the other card edits.
@@ -172,6 +173,7 @@ The divider under each column header is a progress bar.  Filled blocks show the 
 - =simply-kanban-show-clock-total= (default =nil=) — append each column's summed clocked time in braces (={1:30}=) after its effort total.
 - =simply-kanban-show-remaining= (default =t=) — show =Remaining: 1d 3h 42m= on cards that have clocked time.
 - =simply-kanban-show-remaining-total= (default =nil=) — append each column's summed remaining time in angle brackets (=<1d 3h 42m>=) after its effort total.
+- =simply-kanban-show-over-total= (default =nil=) — append each column's summed over-budget time after an exclamation mark (=!30m=).
 - =simply-kanban-show-column-progress= (default =t=) — replace each column divider with a progress bar showing the completed share of its estimated effort.
 - =simply-kanban-default-sprint= (default =nil=) — sprint number a board filters to when first opened; =nil= shows all sprints.  Change the displayed sprint live with =S=.
 - =simply-kanban-show-sprint= (default =t=) — show a card's =SPRINT= number (=Sprint: N=) while no sprint filter is active.
@@ -181,7 +183,7 @@ The divider under each column header is a progress bar.  Filled blocks show the 
 - =simply-kanban-all-boards= (default =t=) — in a multi-board file, offer an aggregate board (in the chooser and =B=) showing every board's cards at once, each card denoting its board.
 - =simply-kanban-all-boards-name= (default ="All Boards"=) — name of that aggregate entry.
 
-Faces: =simply-kanban-current-card= (focused card), =simply-kanban-tag= (card tags), =simply-kanban-effort= (effort badge and column total), =simply-kanban-clock= (clocked-time badge), =simply-kanban-remaining= (remaining-time badge), =simply-kanban-sprint= (sprint badge), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
+Faces: =simply-kanban-current-card= (focused card), =simply-kanban-tag= (card tags), =simply-kanban-effort= (effort badge and column total), =simply-kanban-clock= (clocked-time badge), =simply-kanban-remaining= (remaining-time badge), =simply-kanban-over= (over-budget badge), =simply-kanban-sprint= (sprint badge), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
 
 * Kanban Feature Comparison Matrix
 
@@ -201,6 +203,7 @@ A cross-cutting view of how Simply Kanban sits among the other kanban options fo
 | Effort estimate + column total  | No         | No        | No         | Yes           |
 | Clocked time on cards           | No         | No        | No         | Yes           |
 | Remaining time on cards         | No         | No        | No         | Yes           |
+| Over-budget indicator           | No         | No        | No         | Yes           |
 | Clock in/out from board         | No         | No        | No         | Yes           |
 | Column progress bars            | No         | No        | No         | Yes           |
 | Sprint summary dynamic block    | No         | No        | No         | Yes           |

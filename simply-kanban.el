@@ -159,6 +159,13 @@ requires `simply-kanban-show-clock' and `simply-kanban-show-remaining'."
   :type 'boolean
   :group 'simply-kanban)
 
+(defcustom simply-kanban-show-over-total nil
+  "When non-nil, append each column's summed over-budget time to its header.
+The total is shown after an exclamation mark, and requires
+`simply-kanban-show-clock' and `simply-kanban-show-remaining'."
+  :type 'boolean
+  :group 'simply-kanban)
+
 (defcustom simply-kanban-show-column-progress t
   "When non-nil, replace each column divider with a progress bar.
 The filled portion is the completed share of the column's estimated effort:
@@ -244,6 +251,11 @@ height other than 1.0, which would break the board's monospace alignment."
 (defface simply-kanban-remaining
   '((t :inherit org-special-keyword))
   "Face for the remaining-time badge shown on a card."
+  :group 'simply-kanban)
+
+(defface simply-kanban-over
+  '((t :inherit warning))
+  "Face for the over-budget badge shown on a card."
   :group 'simply-kanban)
 
 (defface simply-kanban-sprint
@@ -385,10 +397,11 @@ The value includes the currently running clock interval, if any."
 (defun simply-kanban--collect-tasks (buffer &optional restrict)
   "Collect TODO entries from Org BUFFER as a list of card plists.
 Each plist has :keyword :title :body :priority :tags :effort :clocked
-:clocking :remaining :done :sprint :file :board :marker.  :clocked is the
+:clocking :remaining :over :done :sprint :file :board :marker.  :clocked is the
 heading's clocked minutes (including a running clock) and :clocking is
 non-nil for the active clock.  :remaining is the estimate left after clocked
-time, and :done is non-nil for a done keyword.  :sprint is the heading's
+time, :over is the clocked time beyond the estimate, and :done is non-nil
+for a done keyword.  :sprint is the heading's
 `SPRINT' property as an integer (nil when unset or non-numeric), inherited
 from parent headings.  :board is filled in only by
 `simply-kanban--collect-boards'.
@@ -417,7 +430,11 @@ RESTRICT limits which entries become cards:
                            (remaining (and simply-kanban-show-clock
                                            simply-kanban-show-remaining
                                            (simply-kanban--remaining-minutes
-                                            effort clocked done))))
+                                            effort clocked done)))
+                           (over (and simply-kanban-show-clock
+                                      simply-kanban-show-remaining
+                                      (simply-kanban--over-minutes
+                                       effort clocked))))
                       (push (list :keyword kw
                                   :title (substring-no-properties
                                           (or (org-get-heading t t t t) ""))
@@ -429,6 +446,7 @@ RESTRICT limits which entries become cards:
                                   :clocking (and simply-kanban-show-clock
                                                  (simply-kanban--clocking-p))
                                   :remaining remaining
+                                  :over over
                                   :done done
                                   :sprint (simply-kanban--read-sprint)
                                   :file file
@@ -624,6 +642,15 @@ otherwise the result is EFFORT minus CLOCKED, floored at zero."
           0
         (max 0 (- effort-minutes (or clocked 0)))))))
 
+(defun simply-kanban--over-minutes (effort clocked)
+  "Return over-budget minutes for EFFORT and CLOCKED.
+EFFORT is an Org duration string and CLOCKED is minutes.  Returns nil when
+EFFORT is missing or invalid; otherwise the result is CLOCKED minus EFFORT,
+floored at zero."
+  (let ((effort-minutes (simply-kanban--effort-minutes effort)))
+    (when effort-minutes
+      (max 0 (- (or clocked 0) effort-minutes)))))
+
 (defun simply-kanban--format-effort (minutes)
   "Return MINUTES formatted as an Org duration string."
   (if (fboundp 'org-duration-from-minutes)
@@ -665,6 +692,13 @@ zero minutes is \"0m\"."
   "Return the summed remaining time of TASKS, or nil when none remains."
   (let ((total (cl-reduce (lambda (acc tk)
                             (+ acc (or (plist-get tk :remaining) 0)))
+                          tasks :initial-value 0)))
+    (when (> total 0) (simply-kanban--format-jira-duration total))))
+
+(defun simply-kanban--column-over (tasks)
+  "Return the summed over-budget time of TASKS, or nil when none is over."
+  (let ((total (cl-reduce (lambda (acc tk)
+                            (+ acc (or (plist-get tk :over) 0)))
                           tasks :initial-value 0)))
     (when (> total 0) (simply-kanban--format-jira-duration total))))
 
@@ -713,8 +747,9 @@ it already fits; otherwise it is cut to the limit with an ellipsis appended."
   "Return compact card lines for TASK fitting WIDTH.
 A card shows its title prefixed by a priority cookie when one is set, then
 its tags (when any), its sprint (when no sprint filter is active), its effort
-estimate, its clocked and remaining time when present, and -- in an aggregated
-board -- its board (when showing all boards in a file) or source file.  The
+estimate, its clocked, remaining, and over-budget time when present, and --
+in an aggregated board -- its board (when showing all boards in a file) or
+source file.  The
 title is truncated to `simply-kanban--title-length' unless the card is
 expanded.  When the card is expanded (see `simply-kanban--expanded-cards') the
 full title is shown and the Org body follows below a divider."
@@ -752,10 +787,20 @@ full title is shown and the Org body follows below a divider."
                                 (simply-kanban--format-effort (or clocked 0))
                                 (when clocking " (run)"))
                         'face 'simply-kanban-clock)))
+         (over (and simply-kanban-show-remaining (plist-get task :over)))
+         (over-lines
+          (when (and over (> over 0))
+            (simply-kanban--wrap
+             (propertize
+              (concat "Over: "
+                      (simply-kanban--format-jira-duration over))
+              'face 'simply-kanban-over)
+             inner)))
          (remaining (and simply-kanban-show-remaining
                          (plist-get task :remaining)))
          (remaining-lines
           (when (and remaining
+                     (null over-lines)
                      (or clocking (> (or clocked 0) 0)))
             (simply-kanban--wrap
              (propertize
@@ -792,6 +837,8 @@ full title is shown and the Org body follows below a divider."
       (push (funcall box effort-line) lines))
     (when clock-line
       (push (funcall box clock-line) lines))
+    (dolist (oline over-lines)
+      (push (funcall box oline) lines))
     (dolist (rline remaining-lines)
       (push (funcall box rline) lines))
     (when board-line
@@ -839,13 +886,19 @@ Each returned string is exactly WIDTH columns wide."
                                simply-kanban-show-remaining
                                simply-kanban-show-remaining-total
                                (simply-kanban--column-remaining col-tasks)))
+         (over-total (and simply-kanban-show-clock
+                          simply-kanban-show-remaining
+                          simply-kanban-show-over-total
+                          (simply-kanban--column-over col-tasks)))
          (progress (and simply-kanban-show-column-progress
                         (simply-kanban--column-progress col-tasks)))
          (header (propertize (concat (format " %s (%d)" keyword (length col-tasks))
                                      (when effort-total (format " [%s]" effort-total))
                                      (when clock-total (format " {%s}" clock-total))
                                      (when remaining-total
-                                       (format " <%s>" remaining-total)))
+                                       (format " <%s>" remaining-total))
+                                     (when over-total
+                                       (format " !%s" over-total)))
                              'face header-face
                              'simply-kanban-keyword keyword))
          (divider (if simply-kanban-show-column-progress
