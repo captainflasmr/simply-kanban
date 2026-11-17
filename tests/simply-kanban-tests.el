@@ -194,6 +194,71 @@
       (should-not (cl-some (lambda (l) (string-match-p "Over:" l))
                            lines)))))
 
+(ert-deftest sk-test-entry-body-excludes-logbook ()
+  "Expanded body keeps notes and prose but drops LOGBOOK entries."
+  (sk-test-with-org (concat "* TODO Parser\n"
+                            ":PROPERTIES:\n:Effort:   1:00\n:END:\n"
+                            "- Note taken on [2024-01-01 Mon 09:00] \\\\\n"
+                            "  a useful note\n"
+                            ":LOGBOOK:\n"
+                            "CLOCK: [2024-01-01 Mon 09:00]--[2024-01-01 Mon 10:00] =>  1:00\n"
+                            ":END:\n"
+                            "\n"
+                            "Parser body.\n")
+    (let ((body (simply-kanban--entry-body)))
+      (should (string-match-p "a useful note" body))
+      (should (string-match-p "Parser body" body))
+      (should-not (string-match-p "CLOCK:" body))
+      (should-not (string-match-p ":LOGBOOK:" body)))))
+
+(ert-deftest sk-test-entry-logbook ()
+  "`--entry-logbook' returns the LOGBOOK drawer contents."
+  (sk-test-with-org (concat "* TODO Parser\n"
+                            ":LOGBOOK:\n"
+                            "CLOCK: [2024-01-01 Mon 09:00]--[2024-01-01 Mon 10:00] =>  1:00\n"
+                            ":END:\n")
+    (should (string= (simply-kanban--entry-logbook)
+                     "CLOCK: [2024-01-01 Mon 09:00]--[2024-01-01 Mon 10:00] =>  1:00"))))
+
+(ert-deftest sk-test-collect-logbook ()
+  "`--collect-tasks' reads the LOGBOOK drawer into `:logbook'."
+  (sk-test-with-org (concat "* TODO Parser\n"
+                            ":LOGBOOK:\n"
+                            "CLOCK: [2024-01-01 Mon 09:00]--[2024-01-01 Mon 10:00] =>  1:00\n"
+                            ":END:\n")
+    (let ((task (car (simply-kanban--collect-tasks src))))
+      (should (string-match-p "CLOCK:" (plist-get task :logbook))))))
+
+(ert-deftest sk-test-toggle-logbook ()
+  "`L' shows and hides the card's LOGBOOK drawer on the board."
+  (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                              "* TODO Alpha\n"
+                              ":LOGBOOK:\n"
+                              "CLOCK: [2024-01-01 Mon 09:00]--[2024-01-01 Mon 10:00] =>  1:00\n"
+                              ":END:\n")
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (simply-kanban-toggle-logbook)
+    (should (string-match-p "Logbook" (buffer-string)))
+    (should (string-match-p "CLOCK:" (buffer-string)))
+    (simply-kanban-toggle-logbook)
+    (should-not (string-match-p "CLOCK:" (buffer-string)))))
+
+(ert-deftest sk-test-add-note-setup ()
+  "`simply-kanban-add-note' sets up an Org note for the card at point."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (unwind-protect
+        (progn
+          (simply-kanban-add-note)
+          (should (eq org-log-note-purpose 'note))
+          (should (eq (marker-buffer org-log-note-marker) src)))
+      (setq org-log-note-purpose nil)
+      (when (markerp org-log-note-marker)
+        (set-marker org-log-note-marker nil))
+      (remove-hook 'post-command-hook 'org-add-log-note))))
+
 (ert-deftest sk-test-collect-remaining ()
   "`--collect-tasks' computes remaining time from effort and clock entries."
   (sk-test-with-org (concat "* TODO Parser\n"

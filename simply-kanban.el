@@ -316,6 +316,9 @@ A card's sprint is its `SPRINT' property.  Initialised from
 (defvar-local simply-kanban--expanded-cards nil
   "Markers of cards whose Org body is currently shown on the board.")
 
+(defvar-local simply-kanban--logbook-cards nil
+  "Markers of cards whose LOGBOOK drawer is currently shown on the board.")
+
 (defvar-local simply-kanban--title-length nil
   "Maximum characters of a card title shown on this board, or nil for no limit.
 Initialised from `simply-kanban-max-title-length' when the board opens; change
@@ -337,10 +340,25 @@ When set, cards show which board they belong to (their `:board' field).")
     (or (and (boundp 'org-todo-keywords-1) org-todo-keywords-1)
         '("TODO" "DONE"))))
 
+(defun simply-kanban--strip-logbook (text)
+  "Remove LOGBOOK drawers and CLOCK lines from TEXT."
+  (let ((in-logbook nil)
+        result)
+    (dolist (line (split-string text "\n"))
+      (cond
+       ((string-match-p "^[ \t]*:LOGBOOK:[ \t]*$" line)
+        (setq in-logbook t))
+       ((and in-logbook (string-match-p "^[ \t]*:END:[ \t]*$" line))
+        (setq in-logbook nil))
+       (in-logbook nil)
+       ((string-match-p "^[ \t]*CLOCK:" line) nil)
+       (t (push line result))))
+    (string-trim (mapconcat #'identity (nreverse result) "\n"))))
+
 (defun simply-kanban--entry-body ()
   "Return the body text of the Org entry at point, or nil when empty.
-Excludes the heading, its planning line, and any property/logbook drawer;
-text belonging to child headings is not included."
+Excludes the heading, its planning line, any property/logbook drawer, and
+clock lines; text belonging to child headings is not included."
   (save-excursion
     (org-back-to-heading t)
     (let ((end (save-excursion (outline-next-heading) (point))))
@@ -349,8 +367,27 @@ text belonging to child headings is not included."
       ;; heading; clamp so its text is never swept into the body.
       (let ((beg (min (point) end)))
         (when (< beg end)
-          (let ((body (string-trim (buffer-substring-no-properties beg end))))
+          (let ((body (simply-kanban--strip-logbook
+                       (buffer-substring-no-properties beg end))))
             (unless (string-empty-p body) body)))))))
+
+(defun simply-kanban--entry-logbook ()
+  "Return the LOGBOOK drawer text of the Org entry at point, or nil."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((end (save-excursion (outline-next-heading) (point))))
+      (when (re-search-forward "^[ \t]*:LOGBOOK:[ \t]*$" end t)
+        (let ((drawer-start (line-beginning-position)))
+          (when (re-search-forward "^[ \t]*:END:[ \t]*$" end t)
+            (let ((contents-start (save-excursion
+                                    (goto-char drawer-start)
+                                    (forward-line 1)
+                                    (point)))
+                  (contents-end (line-beginning-position)))
+              (when (< contents-start contents-end)
+                (string-trim
+                 (buffer-substring-no-properties
+                  contents-start contents-end))))))))))
 
 (defun simply-kanban--read-sprint ()
   "Return the SPRINT property of the Org entry at point as an integer, or nil.
@@ -396,7 +433,7 @@ The value includes the currently running clock interval, if any."
 
 (defun simply-kanban--collect-tasks (buffer &optional restrict)
   "Collect TODO entries from Org BUFFER as a list of card plists.
-Each plist has :keyword :title :body :priority :tags :effort :clocked
+Each plist has :keyword :title :body :logbook :priority :tags :effort :clocked
 :clocking :remaining :over :done :sprint :file :board :marker.  :clocked is the
 heading's clocked minutes (including a running clock) and :clocking is
 non-nil for the active clock.  :remaining is the estimate left after clocked
@@ -439,6 +476,7 @@ RESTRICT limits which entries become cards:
                                   :title (substring-no-properties
                                           (or (org-get-heading t t t t) ""))
                                   :body (simply-kanban--entry-body)
+                                  :logbook (simply-kanban--entry-logbook)
                                   :priority (nth 3 comps)
                                   :tags (org-get-tags nil t)
                                   :effort effort
@@ -623,6 +661,12 @@ buffer (or buffers sharing a workflow) the natural order is kept."
   (and marker
        (seq-some (lambda (m) (simply-kanban--same-card-p m marker))
                  simply-kanban--expanded-cards)))
+
+(defun simply-kanban--card-logbook-p (marker)
+  "Non-nil when the card identified by MARKER should show its LOGBOOK."
+  (and marker
+       (seq-some (lambda (m) (simply-kanban--same-card-p m marker))
+                 simply-kanban--logbook-cards)))
 
 (defun simply-kanban--effort-minutes (effort)
   "Return EFFORT (an Org effort string such as \"1:30\") in minutes, or nil.
@@ -815,6 +859,8 @@ full title is shown and the Org body follows below a divider."
                       (propertize (concat "» " (or (plist-get task :file) "org"))
                                   'face 'shadow)))
          (body (and expanded (plist-get task :body)))
+         (logbook (and (simply-kanban--card-logbook-p marker)
+                       (plist-get task :logbook)))
          (box (lambda (s)
                 (concat (propertize "│" 'face border-face)
                         " "
@@ -852,6 +898,14 @@ full title is shown and the Org body follows below a divider."
             (push (funcall box "") lines)
           (dolist (bl (simply-kanban--wrap raw inner))
             (push (funcall box bl) lines)))))
+    (when logbook
+      (push (funcall rule "├" "┤") lines)
+      (push (funcall box "Logbook") lines)
+      (dolist (raw (split-string logbook "\n"))
+        (if (string-empty-p raw)
+            (push (funcall box "") lines)
+          (dolist (ll (simply-kanban--wrap raw inner))
+            (push (funcall box ll) lines)))))
     (push (funcall rule "└" "┘") lines)
     (nreverse lines)))
 
@@ -1318,6 +1372,20 @@ Candidates are the keywords of the card's own Org file."
         (simply-kanban-clock-out)
       (simply-kanban-clock-in))))
 
+(defun simply-kanban-add-note ()
+  "Add a timestamped note to the card at point with Org's note prompt.
+The note is stored with `org-add-note' on the card's heading; boards built
+from that Org buffer refresh once the note is stored."
+  (interactive)
+  (let ((marker (simply-kanban--marker-at-point)))
+    (unless (and marker (buffer-live-p (marker-buffer marker)))
+      (user-error "Point is not on a card"))
+    (with-current-buffer (marker-buffer marker)
+      (org-with-wide-buffer
+       (goto-char marker)
+       (org-back-to-heading t)
+       (org-add-note)))))
+
 (defun simply-kanban-set-tag-filter ()
   "Filter the board to show only cards with a given tag."
   (interactive)
@@ -1554,6 +1622,17 @@ Installed buffer-locally on each source buffer's `after-save-hook'."
     (with-current-buffer board
       (simply-kanban-refresh))))
 
+(defun simply-kanban--after-note-stored ()
+  "Save the source and refresh boards after an Org note is stored.
+Runs from `org-after-note-stored-hook' in the source Org buffer."
+  (when (simply-kanban--boards-for (current-buffer))
+    (simply-kanban--maybe-save (current-buffer))
+    (dolist (board (simply-kanban--boards-for (current-buffer)))
+      (with-current-buffer board
+        (simply-kanban-refresh)))))
+
+(add-hook 'org-after-note-stored-hook #'simply-kanban--after-note-stored)
+
 (defun simply-kanban--on-board-kill ()
   "Drop each source's refresh hook when this board was its last consumer.
 Installed buffer-locally on the board buffer's `kill-buffer-hook'."
@@ -1612,6 +1691,19 @@ When enabled, navigating between cards also reveals the heading in its file."
               (cl-remove-if (lambda (m) (simply-kanban--same-card-p m marker))
                             simply-kanban--expanded-cards))
       (push (copy-marker marker) simply-kanban--expanded-cards))
+    (simply-kanban-refresh)))
+
+(defun simply-kanban-toggle-logbook ()
+  "Toggle showing the LOGBOOK drawer of the card at point."
+  (interactive)
+  (let ((marker (simply-kanban--marker-at-point)))
+    (unless marker
+      (user-error "Point is not on a card"))
+    (if (simply-kanban--card-logbook-p marker)
+        (setq simply-kanban--logbook-cards
+              (cl-remove-if (lambda (m) (simply-kanban--same-card-p m marker))
+                            simply-kanban--logbook-cards))
+      (push (copy-marker marker) simply-kanban--logbook-cards))
     (simply-kanban-refresh)))
 
 (defun simply-kanban-toggle-expand-all ()
@@ -1681,6 +1773,8 @@ share the same `simply-kanban-marker' text property."
     (define-key map (kbd ":") #'simply-kanban-set-tags)
     (define-key map (kbd ",") #'simply-kanban-set-priority)
     (define-key map (kbd ";") #'simply-kanban-set-effort)
+    (define-key map (kbd "N") #'simply-kanban-add-note)
+    (define-key map (kbd "L") #'simply-kanban-toggle-logbook)
     (define-key map (kbd "#") #'simply-kanban-set-sprint)
     (define-key map (kbd "i") #'simply-kanban-clock-in)
     (define-key map (kbd "o") #'simply-kanban-clock-out)
@@ -1752,6 +1846,8 @@ Uses the plain header-line foreground so it reads well on any theme."
           (:eval (propertize "{}" 'face 'help-key-binding)) " move  "
           (:eval (propertize "s" 'face 'help-key-binding)) " status  "
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
+          (:eval (propertize "N" 'face 'help-key-binding)) " note  "
+          (:eval (propertize "L" 'face 'help-key-binding)) " log  "
           (:eval (propertize ":" 'face 'help-key-binding)) " tags  "
           (:eval (propertize ";" 'face 'help-key-binding)) " effort  "
           (:eval (propertize "i/o" 'face 'help-key-binding)) " clock  "
@@ -1789,6 +1885,7 @@ Uses the plain header-line foreground so it reads well on any theme."
     ("," "set priority"    simply-kanban-set-priority)
     (":" "set tags"        simply-kanban-set-tags)
     (";" "set effort"      simply-kanban-set-effort)
+    ("N" "add note"        simply-kanban-add-note)
     ("#" "set sprint"      simply-kanban-set-sprint)
     ("k" "delete card"     simply-kanban-delete)]
    ["Clock"
@@ -1799,6 +1896,7 @@ Uses the plain header-line foreground so it reads well on any theme."
     ("v" "other window"     simply-kanban-jump-other-window)
     ("e" "expand card"      simply-kanban-toggle-expand :transient t)
     ("E" "expand all"       simply-kanban-toggle-expand-all :transient t)
+    ("L" "show logbook"     simply-kanban-toggle-logbook :transient t)
     ("F" "follow mode"      simply-kanban-toggle-follow :transient t)]
    ["Board"
     ("t" "filter by tag"    simply-kanban-set-tag-filter)

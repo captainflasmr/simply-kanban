@@ -66,6 +66,8 @@ A header-line shows the source and the key reminders.  Columns expand to fill th
 | =o=       | clock out the running clock                          |
 | =#=       | set the sprint (=SPRINT= property) on the card        |
 | =e= / =E= | toggle the body of the card / every card             |
+| =N=       | add a timestamped note to the card at point           |
+| =L=       | toggle the card's LOGBOOK drawer on the board         |
 | =l=       | set the max card-title length (empty = no limit)     |
 | =F=       | toggle follow mode (show heading as you move)        |
 | =B=       | switch board (multi-board files only)                |
@@ -154,6 +156,10 @@ The board reads the source headings' Org clock entries, so time clocked anywhere
 
 Clock commands save the source buffer when =simply-kanban-save-after-change= is non-nil, matching the other card edits.
 
+* Notes and logbook
+
+Press =N= on a card to add a timestamped note with Org's native note prompt (=org-add-note=); finish with =C-c C-c=. The note is stored on the card's heading, honouring =org-log-into-drawer=, and boards built from that Org buffer refresh once the note is stored. Press =L= to toggle the card's =LOGBOOK= drawer on the board, showing its clock entries and any notes stored in the drawer below a =Logbook= divider. The body shown by =e= includes notes and prose but omits =LOGBOOK= clock entries; notes stored outside the drawer remain part of that body.
+
 * Column progress
 
 The divider under each column header is a progress bar.  Filled blocks show the completed share of that column's estimated effort: a =DONE= card counts as fully complete, while an in-progress card counts its clocked time capped at its estimate.  The empty portion is drawn in the =shadow= face, and the filled portion uses the column's TODO-keyword colour.  When no effort estimates are set, the done-card count is used instead.
@@ -205,6 +211,8 @@ A cross-cutting view of how Simply Kanban sits among the other kanban options fo
 | Remaining time on cards         | No         | No        | No         | Yes           |
 | Over-budget indicator           | No         | No        | No         | Yes           |
 | Clock in/out from board         | No         | No        | No         | Yes           |
+| Add note from board             | No         | No        | Yes        | Yes           |
+| Show logbook on card            | No         | No        | No         | Yes           |
 | Column progress bars            | No         | No        | No         | Yes           |
 | Sprint summary dynamic block    | No         | No        | No         | Yes           |
 | Sprint filter (property-based)   | No         | No        | Partial    | Yes           |
