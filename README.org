@@ -142,6 +142,12 @@ The board reads the source headings' Org clock entries, so time clocked anywhere
 
 Clock commands save the source buffer when =simply-kanban-save-after-change= is non-nil, matching the other card edits.
 
+* Column progress
+
+The divider under each column header is a progress bar.  Filled blocks show the completed share of that column's estimated effort: a =DONE= card counts as fully complete, while an in-progress card counts its clocked time capped at its estimate.  The empty portion is drawn in the =shadow= face, and the filled portion uses the column's TODO-keyword colour.  When no effort estimates are set, the done-card count is used instead.
+
+- =simply-kanban-show-column-progress= (default =t=) — replace the column divider with the progress bar; set it to =nil= to restore the plain dashes.
+
 * Customisation
 
 - =simply-kanban-min-column-width= (default 24) — columns expand to fill the window but never go narrower than this.
@@ -155,6 +161,7 @@ Clock commands save the source buffer when =simply-kanban-save-after-change= is 
 - =simply-kanban-show-clock-total= (default =nil=) — append each column's summed clocked time in braces (={1:30}=) after its effort total.
 - =simply-kanban-show-remaining= (default =t=) — show =Remaining: 1d 3h 42m= on cards that have clocked time.
 - =simply-kanban-show-remaining-total= (default =nil=) — append each column's summed remaining time in angle brackets (=<1d 3h 42m>=) after its effort total.
+- =simply-kanban-show-column-progress= (default =t=) — replace each column divider with a progress bar showing the completed share of its estimated effort.
 - =simply-kanban-default-sprint= (default =nil=) — sprint number a board filters to when first opened; =nil= shows all sprints.  Change the displayed sprint live with =S=.
 - =simply-kanban-show-sprint= (default =t=) — show a card's =SPRINT= number (=Sprint: N=) while no sprint filter is active.
 - =simply-kanban-save-after-change= (default =t=) — save the source Org buffer after a status change or deletion.
@@ -184,6 +191,7 @@ A cross-cutting view of how Simply Kanban sits among the other kanban options fo
 | Clocked time on cards           | No         | No        | No         | Yes           |
 | Remaining time on cards         | No         | No        | No         | Yes           |
 | Clock in/out from board         | No         | No        | No         | Yes           |
+| Column progress bars            | No         | No        | No         | Yes           |
 | Sprint filter (property-based)   | No         | No        | Partial    | Yes           |
 | Inline card body / detail       | No         | No        | Yes        | Yes           |
 | Multiple boards per file        | Yes        | Yes       | Yes        | Yes           |

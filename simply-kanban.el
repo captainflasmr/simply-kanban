@@ -159,6 +159,15 @@ requires `simply-kanban-show-clock' and `simply-kanban-show-remaining'."
   :type 'boolean
   :group 'simply-kanban)
 
+(defcustom simply-kanban-show-column-progress t
+  "When non-nil, replace each column divider with a progress bar.
+The filled portion is the completed share of the column's estimated effort:
+DONE cards count fully, while in-progress cards count their clocked time
+capped at their estimate.  If no effort estimates are set, the done-card
+count is used instead.  The empty portion uses the `shadow' face."
+  :type 'boolean
+  :group 'simply-kanban)
+
 (defcustom simply-kanban-default-sprint nil
   "Sprint number a board filters to when first opened, or nil for all sprints.
 A card's sprint is its `SPRINT' property (an integer, inherited from parent
@@ -659,6 +668,38 @@ zero minutes is \"0m\"."
                           tasks :initial-value 0)))
     (when (> total 0) (simply-kanban--format-jira-duration total))))
 
+(defun simply-kanban--column-progress (tasks)
+  "Return the completed fraction of TASKS, or nil when there is no data.
+Completed effort counts a DONE task as fully complete and an in-progress
+task as its clocked time, capped at its estimate.  Falls back to the
+done-card count when no efforts are set."
+  (let ((effort-total 0)
+        (burned-total 0))
+    (dolist (task tasks)
+      (let ((effort (simply-kanban--effort-minutes (plist-get task :effort))))
+        (when effort
+          (setq effort-total (+ effort-total effort))
+          (setq burned-total
+                (+ burned-total
+                   (if (plist-get task :done)
+                       effort
+                     (min effort (or (plist-get task :clocked) 0))))))))
+    (cond
+     ((> effort-total 0) (/ burned-total (float effort-total)))
+     ((> (length tasks) 0)
+      (/ (seq-count (lambda (task) (plist-get task :done)) tasks)
+         (float (length tasks))))
+     (t nil))))
+
+(defun simply-kanban--progress-bar (fraction width face)
+  "Return a progress bar of WIDTH characters for FRACTION, filled with FACE."
+  (let* ((fraction (max 0.0 (min 1.0 (or fraction 0.0))))
+         (filled (round (* fraction width)))
+         (empty (- width filled)))
+    (concat
+     (propertize (make-string filled ?█) 'face face)
+     (propertize (make-string empty ?░) 'face 'shadow))))
+
 (defun simply-kanban--truncate-title (title expanded)
   "Return TITLE shortened to `simply-kanban--title-length' characters.
 Returns TITLE unchanged when EXPANDED is non-nil, when no limit is set, or when
@@ -798,6 +839,8 @@ Each returned string is exactly WIDTH columns wide."
                                simply-kanban-show-remaining
                                simply-kanban-show-remaining-total
                                (simply-kanban--column-remaining col-tasks)))
+         (progress (and simply-kanban-show-column-progress
+                        (simply-kanban--column-progress col-tasks)))
          (header (propertize (concat (format " %s (%d)" keyword (length col-tasks))
                                      (when effort-total (format " [%s]" effort-total))
                                      (when clock-total (format " {%s}" clock-total))
@@ -805,9 +848,13 @@ Each returned string is exactly WIDTH columns wide."
                                        (format " <%s>" remaining-total)))
                              'face header-face
                              'simply-kanban-keyword keyword))
-         (divider (propertize (make-string width ?─)
-                              'face 'shadow
-                              'simply-kanban-keyword keyword))
+         (divider (if simply-kanban-show-column-progress
+                      (propertize (simply-kanban--progress-bar
+                                   progress width header-face)
+                                  'simply-kanban-keyword keyword)
+                    (propertize (make-string width ?─)
+                                'face 'shadow
+                                'simply-kanban-keyword keyword)))
          ;; Built bottom-up: the whole list is `nreverse'd below, so these
          ;; sit reversed here to render as header, divider, then a blank gap.
          (cells (list (simply-kanban--pad "" width)

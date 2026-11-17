@@ -171,6 +171,41 @@
   (should (null (simply-kanban--column-remaining
                  (list (list :remaining 0) (list :remaining nil))))))
 
+(ert-deftest sk-test-progress-bar ()
+  "`--progress-bar' fills the requested fraction and empties the rest."
+  (let ((bar (simply-kanban--progress-bar 0.5 10 'bold)))
+    (should (= 10 (string-width bar)))
+    (should (= 5 (seq-count (lambda (char) (eq char ?█))
+                            (string-to-list bar))))
+    (should (= 5 (seq-count (lambda (char) (eq char ?░))
+                            (string-to-list bar)))))
+  (let ((bar (simply-kanban--progress-bar nil 6 'bold)))
+    (should (= 6 (seq-count (lambda (char) (eq char ?░))
+                            (string-to-list bar))))))
+
+(ert-deftest sk-test-column-progress ()
+  "`--column-progress' burns done and clocked effort against estimates."
+  (let ((tasks (list (list :effort "2:00" :clocked 60 :done nil)
+                     (list :effort "2:00" :clocked 120 :done nil)
+                     (list :effort "4:00" :clocked 0 :done t))))
+    ;; Total 8:00 = 480 min; burned 60 + 120 + 240 = 420 => 0.875.
+    (should (= 0.875 (simply-kanban--column-progress tasks)))))
+
+(ert-deftest sk-test-column-progress-count-fallback ()
+  "`--column-progress' falls back to the done-card count without efforts."
+  (let ((tasks (list (list :done t) (list :done nil))))
+    (should (= 0.5 (simply-kanban--column-progress tasks)))))
+
+(ert-deftest sk-test-column-progress-renders ()
+  "A DONE column with effort renders a filled progress bar."
+  (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                              "* DONE Alpha\n"
+                              ":PROPERTIES:\n:Effort:   1:00\n:END:\n")
+    (goto-char (point-min))
+    (should (re-search-forward "█" nil t))
+    (goto-char (point-min))
+    (should (re-search-forward "░" nil t))))
+
 (ert-deftest sk-test-format-jira-duration ()
   "Remaining time renders with Jira-style day/hour/minute units."
   (let ((org-duration-units '(("min" . 1) ("h" . 60) ("d" . 444))))
