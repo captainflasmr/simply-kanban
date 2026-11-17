@@ -1831,5 +1831,79 @@ workflow and is written back to that file."
 (with-eval-after-load 'org
   (define-key org-mode-map (kbd "C-c ;") #'simply-kanban-show-card))
 
+;;; Sprint summary
+
+(defun simply-kanban--format-org-table (rows)
+  "Return ROWS as an aligned Org table with a header separator."
+  (let ((text (orgtbl-to-orgtbl rows nil)))
+    (with-temp-buffer
+      (org-mode)
+      (insert text)
+      (goto-char (point-min))
+      (org-table-insert-hline)
+      (org-table-align)
+      (buffer-string))))
+
+(defun simply-kanban--sprint-summary-entry ()
+  "Return a sprint summary data row for the heading at point, or nil."
+  (let ((sprint (org-entry-get nil "SPRINT" t))
+        (state (org-get-todo-state)))
+    (when (and state sprint (string-match-p "\\`[0-9]+\\'" sprint))
+      (let* ((effort (simply-kanban--effort-minutes
+                      (org-entry-get nil "Effort" t)))
+             (done (and (member state org-done-keywords) t))
+             (clocked (simply-kanban--clocked-minutes))
+             (burned (if done
+                         (or effort 0)
+                       (min (or effort 0) clocked))))
+        (list (string-to-number sprint)
+              (or effort 0)
+              (if done 1 0)
+              clocked
+              burned)))))
+
+(defun simply-kanban--sprint-summary-rows (&optional scope)
+  "Return sprint summary table rows for SCOPE.
+SCOPE is `file' (the default) or `subtree'.  Each row is
+\(SPRINT TASKS DONE PROGRESS ESTIMATE ACTUAL REMAINING)."
+  (let ((scope (or scope 'file)))
+    (org-with-wide-buffer
+     (org-clock-sum)
+     (let* ((data
+             (delq nil
+                   (org-map-entries
+                    #'simply-kanban--sprint-summary-entry
+                    nil
+                    (if (eq scope 'subtree) 'tree 'file))))
+            (by-sprint (seq-group-by #'car data)))
+       (cons '("Sprint" "Tasks" "Done" "Progress" "Estimate" "Actual" "Remaining")
+             (mapcar
+              (lambda (entry)
+                (let* ((sprint (car entry))
+                       (rows (cdr entry))
+                       (tasks (length rows))
+                       (done (cl-reduce #'+ rows :key #'cl-third :initial-value 0))
+                       (effort (cl-reduce #'+ rows :key #'cl-second :initial-value 0))
+                       (clocked (cl-reduce #'+ rows :key #'cl-fourth :initial-value 0))
+                       (burned (cl-reduce #'+ rows :key #'cl-fifth :initial-value 0)))
+                  (list sprint tasks done
+                        (format "%d%%"
+                                (if (zerop effort) 0
+                                  (round (* 100.0 (/ burned (float effort))))))
+                        (simply-kanban--format-jira-duration effort)
+                        (simply-kanban--format-jira-duration clocked)
+                        (simply-kanban--format-jira-duration (- effort burned)))))
+              (sort by-sprint (lambda (a b) (< (car a) (car b))))))))))
+
+;;;###autoload
+(defun org-dblock-write:simply-kanban-sprint-summary (params)
+  "Write a sprint summary table for the current Org buffer.
+PARAMS may contain :scope with value \"file\" (the default) or \"subtree\"."
+  (let ((scope (or (plist-get params :scope) "file")))
+    (insert
+     (simply-kanban--format-org-table
+      (simply-kanban--sprint-summary-rows
+       (if (member scope '("subtree" subtree)) 'subtree 'file))))))
+
 (provide 'simply-kanban)
 ;;; simply-kanban.el ends here

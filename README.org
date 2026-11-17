@@ -130,6 +130,17 @@ Set the sprint shown by default with =simply-kanban-default-sprint= (default =ni
 (setq simply-kanban-default-sprint 2)
 #+end_src
 
+* Sprint summary
+
+The package provides a dynamic block that summarises all cards by sprint:
+
+#+begin_src org
+,#+BEGIN: simply-kanban-sprint-summary :scope file
+,#+END:
+#+end_src
+
+Each row reports the sprint, task count, done count, effort-weighted progress, estimate, actual clocked time, and remaining estimate.  Durations use the Jira-style day/hour/minute format and the source buffer's =org-duration-units=.  Recompute the block with =C-c C-c=, or update it alongside other dynamic blocks with =M-x org-update-all-dblocks=.  The default scope is the whole file; use =:scope subtree= to limit it to the current subtree.
+
 * Clocking
 
 The board reads the source headings' Org clock entries, so time clocked anywhere in Org is visible on the cards.  Press =i= to clock in the card at point and =o= to clock out whichever task is running.  The active clock is shown in the header line, and its card displays =Clocked: 1:30 (run)=.  Started cards also show the time left, =Remaining: 1d 3h 42m=, calculated from the Effort estimate minus clocked time; a =DONE= card has zero remaining.  The day length in that format follows =org-duration-units= from the source Org buffer, so the project's 37-hour week renders one day as =7h24m= even when the board buffer itself is not visiting that file.
@@ -192,6 +203,7 @@ A cross-cutting view of how Simply Kanban sits among the other kanban options fo
 | Remaining time on cards         | No         | No        | No         | Yes           |
 | Clock in/out from board         | No         | No        | No         | Yes           |
 | Column progress bars            | No         | No        | No         | Yes           |
+| Sprint summary dynamic block    | No         | No        | No         | Yes           |
 | Sprint filter (property-based)   | No         | No        | Partial    | Yes           |
 | Inline card body / detail       | No         | No        | Yes        | Yes           |
 | Multiple boards per file        | Yes        | Yes       | Yes        | Yes           |

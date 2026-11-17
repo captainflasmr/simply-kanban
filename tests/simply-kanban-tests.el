@@ -716,6 +716,50 @@ BODY runs with `board' current."
         (when (get-buffer simply-kanban-buffer-name)
           (kill-buffer simply-kanban-buffer-name))))))
 
+;;; Sprint summary
+
+(defconst sk-test-sprint-summary-content
+  (concat "#+TODO: TODO DOING | DONE\n\n"
+          "* Work breakdown\n"
+          "** Sprint 8\n"
+          "*** TODO A\n"
+          ":PROPERTIES:\n:SPRINT:   8\n:Effort:   1:00\n:END:\n"
+          ":LOGBOOK:\n"
+          "CLOCK: [2026-01-01 Thu 09:00]--[2026-01-01 Thu 09:30] =>  0:30\n"
+          ":END:\n"
+          "*** DONE B\n"
+          ":PROPERTIES:\n:SPRINT:   8\n:Effort:   1:00\n:END:\n"
+          "** Sprint 9\n"
+          "*** TODO C\n"
+          ":PROPERTIES:\n:SPRINT:   9\n:Effort:   2:00\n:END:\n"))
+
+(ert-deftest sk-test-sprint-summary-rows ()
+  "`--sprint-summary-rows' aggregates tasks, done cards, and durations."
+  (sk-test-with-org sk-test-sprint-summary-content
+    (let ((rows (simply-kanban--sprint-summary-rows 'file)))
+      (should (equal (car rows)
+                     '("Sprint" "Tasks" "Done" "Progress"
+                       "Estimate" "Actual" "Remaining")))
+      (should (equal (nth 1 rows) '(8 2 1 "75%" "2h" "30m" "30m")))
+      (should (equal (nth 2 rows) '(9 1 0 "0%" "2h" "0m" "2h"))))))
+
+(ert-deftest sk-test-sprint-summary-dblock ()
+  "The sprint summary dynamic block writes an aligned Org table."
+  (sk-test-with-org sk-test-sprint-summary-content
+    (goto-char (point-max))
+    (insert "\n* Sprint summary\n"
+            "#+BEGIN: simply-kanban-sprint-summary :scope file\n"
+            "#+END:\n")
+    (goto-char (point-min))
+    (search-forward "#+BEGIN: simply-kanban-sprint-summary")
+    (beginning-of-line)
+    (org-dblock-update)
+    (goto-char (point-min))
+    (should (re-search-forward
+             "| +8 +| +2 +| +1 +| +75% +| +2h +| +30m +| +30m +|" nil t))
+    (should (re-search-forward
+             "| +9 +| +1 +| +0 +| +0% +| +2h +| +0m +| +2h +|" nil t))))
+
 ;;; Delete card
 
 (ert-deftest sk-test-delete-card ()
