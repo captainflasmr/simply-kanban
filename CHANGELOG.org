@@ -28,6 +28,7 @@ The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]
 
 - The active sprint filter and running clock now lead the board's header line, ahead of the follow indicator and key reminders, so a narrow window shows them first.
 - The board's header line no longer shows the ~SPC menu~, ~s status~, or ~q quit~ hints; the transient menu is still available with ~SPC~ or ~?~, ~s~ still sets the card's status, and ~q~ still quits the board.
+- The transient menu no longer has a Navigate group; use ~n~, ~p~, ~f~, and ~b~ directly on the board.
 
 ** Removed
 

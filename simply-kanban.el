@@ -1903,11 +1903,6 @@ Uses the plain header-line foreground so it reads well on any theme."
 (transient-define-prefix simply-kanban-transient ()
   "Transient menu for `simply-kanban'."
   [:description simply-kanban--transient-description
-   ["Navigate"
-    ("n" "next card"       simply-kanban-next-card :transient t)
-    ("p" "previous card"   simply-kanban-prev-card :transient t)
-    ("f" "next column"     simply-kanban-next-column :transient t)
-    ("b" "previous column" simply-kanban-prev-column :transient t)]
    ["Move / Edit"
     ("}" "advance stage"   simply-kanban-advance :transient t)
     ("{" "retreat stage"   simply-kanban-retreat :transient t)
