@@ -80,7 +80,7 @@ Press =SPC= (or =?=) for a =transient= menu grouping the commands (Move-Edit / C
 
 The card at point is highlighted, and navigating moves the highlight onto the new card.
 
-To go the other way -- from a heading in the Org file to its card -- run =M-x simply-kanban-show-card= (bound to =C-c ;= in Org buffers) from the Org buffer.  It is the inverse of =RET=: it finds the heading at (or enclosing) point among the board's cards and selects that card, showing the board in another window while focus stays in the Org buffer.  The matched card is filled (face =simply-kanban-mark=) so you can see at a glance which card relates to the heading; that fill clears the moment you navigate to another card on the board.  If no board is open yet it creates one for the file first -- in a split to the right, so the original file stays visible on the left -- and the command always tries to take you to a card.
+To go the other way -- from a heading in the Org file to its card -- run =M-x simply-kanban-show-card= (bound to =C-c ;= in Org buffers) from the Org buffer.  It is the inverse of =RET=: it finds the heading at (or enclosing) point among the board's cards and selects that card, showing the board in another window while focus stays in the Org buffer.  The matched card is filled (face =simply-kanban-mark=) so you can see at a glance which card relates to the heading; that fill clears the moment you navigate to another card on the board.  If no board is open yet it creates one for the file first -- in a split to the right, so the original file stays visible on the left -- and the command always tries to take you to a card.  To jump straight to the card instead, leaving focus on the board, use =C-u C-c ;= or =M-x simply-kanban-jump-to-card=.
 
 To rebind it, e.g.:
 

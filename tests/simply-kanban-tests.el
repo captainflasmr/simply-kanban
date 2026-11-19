@@ -1104,6 +1104,25 @@ BODY runs with `board' current."
         (should (with-current-buffer src
                   (goto-char m) (string= (org-get-heading t t t t) "Beta")))))))
 
+(ert-deftest sk-test-jump-to-card-focuses-board ()
+  "`simply-kanban-jump-to-card' leaves focus on the matching board card."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n"
+    (unwind-protect
+        (progn
+          (switch-to-buffer src)
+          (delete-other-windows)
+          (goto-char (point-min))
+          (re-search-forward "Beta")
+          (simply-kanban-jump-to-card)
+          (should (eq (window-buffer (selected-window)) board))
+          (with-current-buffer board
+            (let ((m (simply-kanban--marker-at-point)))
+              (should m)
+              (should (with-current-buffer src
+                        (goto-char m)
+                        (string= (org-get-heading t t t t) "Beta"))))))
+      (delete-other-windows))))
+
 (defun sk-test--default-board (source)
   "Return the live board buffer for SOURCE's default board spec."
   (simply-kanban--find-board

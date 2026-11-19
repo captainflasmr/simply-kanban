@@ -42,8 +42,9 @@
 ;; From inside the Org file, M-x `simply-kanban-show-card' is the inverse of
 ;; the board's RET: it finds the heading at point among the board's cards
 ;; and selects it, showing the board in another window while focus stays in the
-;; Org buffer.  When no open board contains the heading it creates one first,
-;; so it always tries to take you to a card.
+;; Org buffer.  With a prefix argument, or M-x `simply-kanban-jump-to-card',
+;; focus moves to the card on the board instead.  When no open board contains
+;; the heading it creates one first, so it always tries to take you to a card.
 ;;
 ;;   n / p          next / previous card
 ;;   TAB / S-TAB    next / previous column   (also f / b)
@@ -1744,25 +1745,13 @@ belongs to.  Must be called with the Org buffer current."
        board))
    (simply-kanban--board-buffers)))
 
-(defun simply-kanban-show-card ()
-  "Select, on the kanban board, the card for the Org heading at point.
-The inverse of \\[simply-kanban-goto]: run it from an Org buffer to locate the
-heading at -- or enclosing -- point among the board's cards and select that
-card.  The board is shown in another window but focus stays in the Org buffer.
-The matched card is selected and focused with the usual bold current-card
-highlight, just as if you had navigated to it on the board.
-When the heading itself is not a card (e.g. point is on a non-TODO parent), the
-nearest enclosing card is used.
-
-If no open board contains the card, a board for this file is created first --
-in a split to the right, keeping the Org file visible on the left -- so the
-command always tries to take you to a card.  The card must be currently
-visible; an active tag or sprint filter can hide it."
-  (interactive)
-  (unless (derived-mode-p 'org-mode)
-    (user-error "Not in an Org buffer"))
-  (let ((candidates (simply-kanban--heading-markers-upward))
-        (orig-win (selected-window)))
+(defun simply-kanban--locate-org-card ()
+  "Return (BOARD . ANCHOR) for the card of the Org heading at point.
+ANCHOR is the board's card anchor (POS . MARKER) matching the heading at -- or
+enclosing -- point.  Create a board for the current file when none is open.
+Return nil when no matching card is visible, e.g. because a tag or sprint
+filter hides it.  Must be called with the Org buffer current."
+  (let ((candidates (simply-kanban--heading-markers-upward)))
     (unless candidates
       (user-error "No Org heading at point"))
     (let* ((default-spec (simply-kanban--org-board-spec))
@@ -1776,25 +1765,66 @@ visible; an active tag or sprint filter can hide it."
                  (direction . right)
                  (window-width . 0.5))))
           (setq board (simply-kanban--open default-spec))))
-      (let ((match (and (buffer-live-p board)
-                        (with-current-buffer board
-                          (seq-some #'simply-kanban--anchor-for-marker candidates)))))
-        (if (not match)
-            (message "No matching card on the board for this heading")
-          ;; Reuse the board's own window when it already has one (e.g. the
-          ;; right split we just created); otherwise show it without stealing
-          ;; the Org file's window.
-          (let ((win (or (get-buffer-window board)
-                         (display-buffer board '(nil (inhibit-same-window . t))))))
-            (when (window-live-p win)
-              ;; Select the card in the board window, focusing it with the
-              ;; usual bold current-card highlight.
-              (with-selected-window win
+      (when (buffer-live-p board)
+        (let ((match (with-current-buffer board
+                       (seq-some #'simply-kanban--anchor-for-marker candidates))))
+          (when match (cons board match)))))))
+
+(defun simply-kanban-show-card (&optional focus)
+  "Select, on the kanban board, the card for the Org heading at point.
+The inverse of \\[simply-kanban-goto]: run it from an Org buffer to locate the
+heading at -- or enclosing -- point among the board's cards and select that
+card.  The board is shown in another window but focus stays in the Org buffer.
+The matched card is selected and focused with the usual bold current-card
+highlight, just as if you had navigated to it on the board.
+When the heading itself is not a card (e.g. point is on a non-TODO parent), the
+nearest enclosing card is used.
+
+With a prefix argument FOCUS, select the board window and leave point on the
+card instead of returning focus to the Org buffer; see also
+`simply-kanban-jump-to-card'.
+
+If no open board contains the card, a board for this file is created first --
+in a split to the right, keeping the Org file visible on the left -- so the
+command always tries to take you to a card.  The card must be currently
+visible; an active tag or sprint filter can hide it."
+  (interactive "P")
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not in an Org buffer"))
+  (let ((orig-win (selected-window))
+        (target (simply-kanban--locate-org-card)))
+    (if (not target)
+        (message "No matching card on the board for this heading")
+      (let* ((board (car target))
+             (match (cdr target))
+             ;; Reuse the board's own window when it already has one (e.g. the
+             ;; right split we just created); otherwise show it without
+             ;; stealing the Org file's window.
+             (win (or (get-buffer-window board)
+                      (display-buffer board '(nil (inhibit-same-window . t))))))
+        (when (window-live-p win)
+          (if focus
+              (progn
+                (select-window win)
                 (goto-char (car match))
-                (simply-kanban--highlight-card)))))
-        ;; Keep focus in the Org buffer, even when we had to create the board.
-        (when (window-live-p orig-win)
-          (select-window orig-win))))))
+                (recenter)
+                (simply-kanban--highlight-card))
+            ;; Select the card in the board window, focusing it with the usual
+            ;; bold current-card highlight, but keep focus in the Org buffer.
+            (with-selected-window win
+              (goto-char (car match))
+              (simply-kanban--highlight-card))
+            (when (window-live-p orig-win)
+              (select-window orig-win))))))))
+
+;;;###autoload
+(defun simply-kanban-jump-to-card ()
+  "Jump from the Org heading at point to its card on the kanban board.
+Unlike `simply-kanban-show-card', move focus to the board window and leave
+point on the card.  Create a board for the current file when none is open.
+The card must be visible; an active tag or sprint filter can hide it."
+  (interactive)
+  (simply-kanban-show-card t))
 
 (defun simply-kanban-refresh ()
   "Rebuild the board, re-resolving its source spec.
