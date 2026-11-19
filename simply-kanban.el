@@ -31,7 +31,9 @@
 ;; A single Org file may also define several boards: make each board a
 ;; level-1 heading (with no TODO keyword) and put its cards as TODO
 ;; headings in that subtree.  `simply-kanban' then prompts for which board
-;; to open, and `B' switches between them.  Any loose level-1 TODO headings
+;; to open, and `B' switches between them.  Each board lives in its own buffer
+;; named after its source (and board name), so several boards can stay open at
+;; once.  Any loose level-1 TODO headings
 ;; at the top of such a file are still offered as a flat board named by
 ;; `simply-kanban-toplevel-name'.
 ;;
@@ -40,8 +42,8 @@
 ;; From inside the Org file, M-x `simply-kanban-show-card' is the inverse of
 ;; the board's RET: it finds the heading at point among the board's cards
 ;; and selects it, showing the board in another window while focus stays in the
-;; Org buffer.  When no board is open it creates one first, so it always tries
-;; to take you to a card.
+;; Org buffer.  When no open board contains the heading it creates one first,
+;; so it always tries to take you to a card.
 ;;
 ;;   n / p          next / previous card
 ;;   TAB / S-TAB    next / previous column   (also f / b)
@@ -106,7 +108,11 @@ verbose."
   :group 'simply-kanban)
 
 (defcustom simply-kanban-buffer-name "*Simply Kanban*"
-  "Name of the kanban board buffer."
+  "Base name of kanban board buffers.
+Each board lives in its own buffer named from this base and the board's
+source, e.g. \"*Simply Kanban: tasks.org*\" or
+\"*Simply Kanban: tasks.org ▸ Project Alpha*\", so several boards can stay
+open at once."
   :type 'string
   :group 'simply-kanban)
 
@@ -991,7 +997,7 @@ Each returned string is exactly WIDTH columns wide."
 
 (defun simply-kanban--available-width ()
   "Return the usable character width for laying out columns."
-  (let ((win (or (get-buffer-window simply-kanban-buffer-name)
+  (let ((win (or (get-buffer-window (current-buffer))
                  (selected-window))))
     (if (window-live-p win)
         (max 20 (window-width win))
@@ -1588,6 +1594,16 @@ belongs to.  Must be called with the Org buffer current."
     (cons 'buffer (current-buffer))))
 
 ;;;###autoload
+(defun simply-kanban--board-with-card (candidates)
+  "Return a live board buffer containing a card for one of CANDIDATES."
+  (seq-some
+   (lambda (board)
+     (when (with-current-buffer board
+             (and (derived-mode-p 'simply-kanban-mode)
+                  (seq-some #'simply-kanban--anchor-for-marker candidates)))
+       board))
+   (simply-kanban--board-buffers)))
+
 (defun simply-kanban-show-card ()
   "Select, on the kanban board, the card for the Org heading at point.
 The inverse of \\[simply-kanban-goto]: run it from an Org buffer to locate the
@@ -1598,10 +1614,10 @@ highlight, just as if you had navigated to it on the board.
 When the heading itself is not a card (e.g. point is on a non-TODO parent), the
 nearest enclosing card is used.
 
-When no board is open a board for this file is created first -- in a split to
-the right, keeping the Org file visible on the left -- so the command always
-tries to take you to a card.  The card must be currently visible (not hidden by
-an active tag or sprint filter)."
+If no open board contains the card, a board for this file is created first --
+in a split to the right, keeping the Org file visible on the left -- so the
+command always tries to take you to a card.  The card must be currently
+visible; an active tag or sprint filter can hide it."
   (interactive)
   (unless (derived-mode-p 'org-mode)
     (user-error "Not in an Org buffer"))
@@ -1609,16 +1625,17 @@ an active tag or sprint filter)."
         (orig-win (selected-window)))
     (unless candidates
       (user-error "No Org heading at point"))
-    (let ((board (get-buffer simply-kanban-buffer-name)))
+    (let* ((default-spec (simply-kanban--org-board-spec))
+           (board (or (simply-kanban--board-with-card candidates)
+                      (simply-kanban--find-board default-spec))))
       ;; Create a board for this file if none is open yet, in a split to the
       ;; right so the original Org file stays visible on the left.
-      (unless (buffer-live-p board)
+      (unless board
         (let ((display-buffer-overriding-action
                '((display-buffer-in-direction)
                  (direction . right)
                  (window-width . 0.5))))
-          (simply-kanban--open (simply-kanban--org-board-spec)))
-        (setq board (get-buffer simply-kanban-buffer-name)))
+          (setq board (simply-kanban--open default-spec))))
       (let ((match (and (buffer-live-p board)
                         (with-current-buffer board
                           (seq-some #'simply-kanban--anchor-for-marker candidates)))))
@@ -1874,8 +1891,8 @@ share the same `simply-kanban-marker' text property."
   "Keymap for `simply-kanban-mode'.")
 
 (defun simply-kanban--header-source ()
-  "Return a description of the board's source for the header-line.
-Uses the plain header-line foreground so it reads well on any theme."
+  "Return a human-readable description of the board's source.
+Used to build the board buffer name."
   (pcase simply-kanban--source-spec
     (`(buffer . ,buf)
      (if (buffer-live-p buf) (buffer-name buf) "?"))
@@ -1895,6 +1912,39 @@ Uses the plain header-line foreground so it reads well on any theme."
      (format "agenda (%d)" (length files)))
     (_ "—")))
 
+(defun simply-kanban--same-spec-p (a b)
+  "Return non-nil when board specs A and B describe the same source."
+  (pcase (list a b)
+    (`((buffer . ,b1) (buffer . ,b2)) (eq b1 b2))
+    (`((board ,b1 ,m1) (board ,b2 ,m2))
+     (and (eq b1 b2) (simply-kanban--same-card-p m1 m2)))
+    (`((toplevel . ,b1) (toplevel . ,b2)) (eq b1 b2))
+    (`((all-boards . ,b1) (all-boards . ,b2)) (eq b1 b2))
+    (`((files . ,f1) (files . ,f2)) (equal f1 f2))
+    (_ nil)))
+
+(defun simply-kanban--board-buffers ()
+  "Return all live kanban board buffers."
+  (seq-filter (lambda (buf)
+                (with-current-buffer buf
+                  (derived-mode-p 'simply-kanban-mode)))
+              (buffer-list)))
+
+(defun simply-kanban--find-board (spec)
+  "Return a live board buffer for SPEC, or nil."
+  (seq-find (lambda (buf)
+              (simply-kanban--same-spec-p
+               (buffer-local-value 'simply-kanban--source-spec buf)
+               spec))
+            (simply-kanban--board-buffers)))
+
+(defun simply-kanban--spec-buffer-name (spec)
+  "Return the canonical buffer name for the board described by SPEC."
+  (let* ((base (string-trim simply-kanban-buffer-name "\\*+" "\\*+"))
+         (source (let ((simply-kanban--source-spec spec))
+                   (simply-kanban--header-source))))
+    (format "*%s: %s*" base source)))
+
 (define-derived-mode simply-kanban-mode special-mode "Kanban"
   "Major mode for the Org-linked kanban board.
 
@@ -1902,11 +1952,7 @@ Uses the plain header-line foreground so it reads well on any theme."
   (setq-local truncate-lines t)
   (setq-local cursor-type 'box)
   (setq-local mode-line-buffer-identification
-              (list (propertize "%b" 'face 'mode-line-buffer-id)
-                    '(:eval (let ((src (simply-kanban--header-source)))
-                              (if (string= src "—")
-                                  ""
-                                (concat "  " (propertize src 'face 'italic)))))))
+              (list (propertize "%b" 'face 'mode-line-buffer-id)))
   (setq header-line-format
         '(" "
           ;; Status indicators lead the header line so a narrow window
@@ -1986,16 +2032,22 @@ Uses the plain header-line foreground so it reads well on any theme."
     ("q" "quit board"       quit-window)]])
 
 (defun simply-kanban--open (spec)
-  "Build and display a kanban board for SPEC.
-The buffer is displayed before rendering so columns size to the window."
-  (let ((buffer (get-buffer-create simply-kanban-buffer-name)))
+  "Build and display the kanban board for SPEC, returning its buffer.
+Reuses an existing board for SPEC, or creates a buffer named after the
+board's source.  The buffer is displayed before rendering so columns size
+to the window."
+  (let ((buffer (or (simply-kanban--find-board spec)
+                    (get-buffer-create
+                     (generate-new-buffer-name
+                      (simply-kanban--spec-buffer-name spec))))))
     (with-current-buffer buffer
       (unless (derived-mode-p 'simply-kanban-mode)
         (simply-kanban-mode))
       (setq simply-kanban--sprint-filter simply-kanban-default-sprint
             simply-kanban--title-length simply-kanban-max-title-length))
     (pop-to-buffer buffer)
-    (simply-kanban--render spec)))
+    (simply-kanban--render spec)
+    buffer))
 
 ;;;###autoload
 (defun simply-kanban ()
@@ -2036,11 +2088,18 @@ Only available when the current board came from a multi-board file."
         (user-error "No boards found in %s" (buffer-name buf)))
       (let ((choice (simply-kanban--read-spec boards)))
         (when choice
-          (setq simply-kanban--source-spec (cdr choice)
-                simply-kanban--tag-filter nil
-                simply-kanban--expanded-cards nil)
-          (simply-kanban-refresh)
-          (message "Board: %s" (car choice)))))))
+          (let ((existing (simply-kanban--find-board (cdr choice))))
+            (if (and existing (not (eq existing (current-buffer))))
+                (pop-to-buffer existing)
+              (setq simply-kanban--source-spec (cdr choice)
+                    simply-kanban--tag-filter nil
+                    simply-kanban--expanded-cards nil)
+              (simply-kanban-refresh)
+              (let ((name (simply-kanban--spec-buffer-name
+                           simply-kanban--source-spec)))
+                (unless (string= name (buffer-name))
+                  (rename-buffer name t)))
+              (message "Board: %s" (car choice)))))))))
 
 ;;;###autoload
 (defun simply-kanban-agenda ()

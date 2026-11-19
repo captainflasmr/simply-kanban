@@ -45,7 +45,7 @@ Open an Org file with TODO headings and run =M-x simply-kanban= for a board of t
 
 In an aggregated board the columns are the *union* of the agenda files' TODO keywords, and each card shows which file it comes from (=» file.org=).  Moving a card follows that card's *own* file workflow and is written back to that file, so files using different keyword sequences coexist safely.
 
-A header-line shows the source and the key reminders.  Columns expand to fill the board window; after resizing the window press =g= to refit them.
+The board buffer's name identifies its source, and the header line shows the status indicators and key reminders.  Columns expand to fill the board window; after resizing the window press =g= to refit them.
 
 | Key       | Action                                               |
 |-----------+------------------------------------------------------|
@@ -102,7 +102,7 @@ A single Org file can hold several boards.  Make each board a *level-1 heading w
 ,** DONE prototype
 #+end_src
 
-=M-x simply-kanban= then prompts for which board to open, and =B= switches between them.  Any *loose* level-1 TODO headings sitting at the top of the file (outside a board heading) are still offered as a flat board named by =simply-kanban-toplevel-name= ("Top Level" by default).  A plain file whose top-level headings are themselves TODO items continues to open as a single flat board, exactly as before.
+=M-x simply-kanban= then prompts for which board to open, and =B= switches between them.  Each board opens in its own buffer named after its source and board (for example, =*Simply Kanban: projects.org ▸ Project Alpha*=), so several boards can stay open at once; reopening a board reuses its buffer, and =B= selects an already-open board instead of duplicating it.  Any *loose* level-1 TODO headings sitting at the top of the file (outside a board heading) are still offered as a flat board named by =simply-kanban-toplevel-name= ("Top Level" by default).  A plain file whose top-level headings are themselves TODO items continues to open as a single flat board, exactly as before.
 
 When a file holds more than one board the chooser (and =B=) also offers an *All Boards* entry that aggregates every board into one view — the file's TODO keywords become the columns and each card denotes its board (=▸ Project Alpha=), in the same spirit as the source-file marker (=» file=) on an aggregated agenda board.  Moving a card still changes only its TODO state, so it stays in its own board.  This entry is controlled by =simply-kanban-all-boards= (default =t=) and named by =simply-kanban-all-boards-name=.
 
@@ -170,7 +170,7 @@ The divider under each column header is a progress bar.  Filled blocks show the 
 - =simply-kanban-min-column-width= (default 24) — columns expand to fill the window but never go narrower than this.
 - =simply-kanban-column-gap= (default 2) — spaces between columns.
 - =simply-kanban-max-title-length= (default =nil=) — when an integer, truncate card titles longer than this with an ellipsis; =nil= shows them in full.  Expanding a card (=e=) restores its full title alongside the body, and =l= adjusts the limit live for the current board.
-- =simply-kanban-buffer-name= — name of the board buffer.
+- =simply-kanban-buffer-name= — base name for board buffers; each board appends its source and board name, so multiple boards get distinct buffers.
 - =simply-kanban-auto-refresh= (default =t=) — refresh the board automatically whenever its source Org buffer is saved.
 - =simply-kanban-sort-by-priority= (default =nil=) — when non-nil, sort cards within each column by priority (A > B > C > none).
 - =simply-kanban-show-effort= (default =t=) — show each card's Org =Effort= estimate (=Effort: 2:00=) and sum each column's efforts in brackets (=[2:00]=) in its header.

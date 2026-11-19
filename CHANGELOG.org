@@ -27,6 +27,7 @@ The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]
 
 ** Changed
 
+- Multiple board buffers: each board now opens in its own buffer named from ~simply-kanban-buffer-name~ and its source (for example, ~*Simply Kanban: projects.org ▸ Project Alpha*~), so several boards can stay open at once.  Reopening a board reuses its buffer, ~B~ selects an already-open board, and ~simply-kanban-show-card~ uses the open board containing the heading or creates one.  The mode line now shows the descriptive buffer name instead of repeating the source.
 - The active sprint filter and running clock now lead the board's header line, ahead of the follow indicator and key reminders, so a narrow window shows them first.
 - The board's header line no longer shows the ~SPC menu~, ~s status~, or ~q quit~ hints; the transient menu is still available with ~SPC~ or ~?~, ~s~ still sets the card's status, and ~q~ still quits the board.
 - The transient menu no longer has a Navigate group; use ~n~, ~p~, ~f~, and ~b~ directly on the board.
