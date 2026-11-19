@@ -375,6 +375,37 @@
     (goto-char (point-min))
     (should (re-search-forward "░" nil t))))
 
+(ert-deftest sk-test-card-progress ()
+  "`--card-progress' burns clocked time against the card's estimate."
+  (should (= 1.0 (simply-kanban--card-progress (list :done t))))
+  (should (= 0.5 (simply-kanban--card-progress
+                  (list :effort "2:00" :clocked 60))))
+  (should (= 1.0 (simply-kanban--card-progress
+                  (list :effort "2:00" :clocked 300))))
+  (should (= 0.0 (simply-kanban--card-progress
+                  (list :effort "2:00" :clocked 0))))
+  (should-not (simply-kanban--card-progress (list :clocked 60))))
+
+(ert-deftest sk-test-card-progress-renders ()
+  "A started card with an effort renders its own progress bar."
+  (let ((simply-kanban-show-column-progress nil))
+    (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                                "* TODO Alpha\n"
+                                ":PROPERTIES:\n:Effort:   2:00\n:END:\n"
+                                ":LOGBOOK:\n"
+                                "CLOCK: [2024-01-01 Mon 09:00]--[2024-01-01 Mon 10:00] =>  1:00\n"
+                                ":END:\n")
+      (goto-char (point-min))
+      (should (re-search-forward "█" nil t))
+      (goto-char (point-min))
+      (should (re-search-forward "░" nil t)))))
+
+(ert-deftest sk-test-card-progress-hidden-without-data ()
+  "A card with neither an estimate nor DONE state shows no progress bar."
+  (let ((simply-kanban-show-column-progress nil))
+    (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n"
+      (should-not (string-match-p "█" (buffer-string))))))
+
 (ert-deftest sk-test-format-jira-duration ()
   "Remaining time renders with Jira-style day/hour/minute units."
   (let ((org-duration-units '(("min" . 1) ("h" . 60) ("d" . 444))))

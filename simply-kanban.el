@@ -194,6 +194,17 @@ count is used instead.  The empty portion uses the `shadow' face."
   :type 'boolean
   :group 'simply-kanban)
 
+(defcustom simply-kanban-show-card-progress t
+  "When non-nil, show a progress bar on each card.
+The bar uses the same filled and empty blocks as the column progress
+indicators.  A DONE card is fully filled; any other card is filled by its
+clocked time against its effort estimate, capped at fully complete.  Cards
+without an effort estimate show no bar unless they are DONE.  The filled
+portion uses the card's TODO-keyword face and the empty portion uses the
+`shadow' face."
+  :type 'boolean
+  :group 'simply-kanban)
+
 (defcustom simply-kanban-default-sprint nil
   "Sprint a board filters to when first opened, or nil for all sprints.
 A card's sprint is its `SPRINT' property, a string inherited from parent
@@ -881,6 +892,17 @@ done-card count when no efforts are set."
          (float (length tasks))))
      (t nil))))
 
+(defun simply-kanban--card-progress (task)
+  "Return TASK's completed fraction of its effort estimate, or nil.
+A DONE task is fully complete.  Any other task is its clocked time divided
+by its effort estimate, capped at 1.0.  Tasks without an effort estimate
+have no progress data unless they are DONE."
+  (let ((effort (simply-kanban--effort-minutes (plist-get task :effort))))
+    (cond
+     ((plist-get task :done) 1.0)
+     (effort (/ (min effort (or (plist-get task :clocked) 0)) (float effort)))
+     (t nil))))
+
 (defun simply-kanban--progress-bar (fraction width face)
   "Return a progress bar of WIDTH characters for FRACTION, filled with FACE."
   (let* ((fraction (max 0.0 (min 1.0 (or fraction 0.0))))
@@ -904,7 +926,7 @@ it already fits; otherwise it is cut to the limit with an ellipsis appended."
 A card shows its title prefixed by a priority cookie when one is set, then
 its tags (when any), its sprint (when no sprint filter is active), its
 effort estimate, its story points, its clocked, remaining, and over-budget
-time when present, and --
+time when present, a progress bar when it has progress data, and --
 in an aggregated board -- its board (when showing all boards in a file) or
 source file.  The
 title is truncated to `simply-kanban--title-length' unless the card is
@@ -973,6 +995,10 @@ full title is shown and the Org body follows below a divider."
                       (simply-kanban--format-jira-duration remaining))
               'face 'simply-kanban-remaining)
              inner)))
+         (progress (and simply-kanban-show-card-progress
+                        (simply-kanban--card-progress task)))
+         (progress-line (when progress
+                          (simply-kanban--progress-bar progress inner border-face)))
          (board-line (when simply-kanban--show-board
                        (let ((b (plist-get task :board)))
                          (when b (propertize (concat "▸ " b) 'face 'shadow)))))
@@ -1010,6 +1036,8 @@ full title is shown and the Org body follows below a divider."
       (push (funcall box oline) lines))
     (dolist (rline remaining-lines)
       (push (funcall box rline) lines))
+    (when progress-line
+      (push (funcall box progress-line) lines))
     (when board-line
       (push (funcall box board-line) lines))
     (when file-line

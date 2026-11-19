@@ -178,6 +178,12 @@ The divider under each column header is a progress bar.  Filled blocks show the 
 
 - =simply-kanban-show-column-progress= (default =t=) — replace the column divider with the progress bar; set it to =nil= to restore the plain dashes.
 
+* Card progress
+
+Each card with progress data also carries its own bar, drawn with the same filled (=█=) and empty (=░=) blocks as the column divider.  A =DONE= card is fully filled, while any other card is filled by its clocked time against its =Effort= estimate, capped at fully complete.  Cards without an effort estimate show no bar unless they are =DONE=.  The filled portion uses the card's TODO-keyword colour and the empty portion uses the =shadow= face.
+
+- =simply-kanban-show-card-progress= (default =t=) — show the per-card progress bar; set it to =nil= to hide it.
+
 * Customisation
 
 - =simply-kanban-min-column-width= (default 24) — columns expand to fill the window but never go narrower than this.
@@ -194,6 +200,7 @@ The divider under each column header is a progress bar.  Filled blocks show the 
 - =simply-kanban-show-remaining-total= (default =nil=) — append each column's summed remaining time in angle brackets (=<1d 3h 42m>=) after its effort total.
 - =simply-kanban-show-over-total= (default =nil=) — append each column's summed over-budget time after an exclamation mark (=!30m=).
 - =simply-kanban-show-column-progress= (default =t=) — replace each column divider with a progress bar showing the completed share of its estimated effort.
+- =simply-kanban-show-card-progress= (default =t=) — show a progress bar inside each card, filled by its clocked time against its =Effort= estimate (=DONE= cards are fully filled).
 - =simply-kanban-default-sprint= (default =nil=) — sprint text a board filters to when first opened; =nil= shows all sprints.  Change the displayed sprint live with =S=.
 - =simply-kanban-sprint-from-heading= (default =nil=) — when non-nil, derive a card's sprint from its nearest ancestor heading without a TODO keyword instead of requiring a =SPRINT= property.
 - =simply-kanban-show-sprint= (default =t=) — show a card's sprint (=Sprint: TEXT=) while no sprint filter is active.
