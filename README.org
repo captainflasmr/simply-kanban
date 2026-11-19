@@ -58,6 +58,7 @@ The board buffer's name identifies its source, and the header line shows the sta
 | =t=       | filter board by tag                                  |
 | =T=       | clear tag filter                                     |
 | =S=       | filter board by sprint (=SPRINT= property)           |
+| =C=       | clear sprint filter                                  |
 | =:=       | set the Org tags on the card at point                |
 | =,=       | set the Org priority of the card at point            |
 | =;=       | set the Org effort estimate on the card at point     |

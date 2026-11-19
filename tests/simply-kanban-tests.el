@@ -755,6 +755,7 @@ BODY runs with `board' current."
   (should (eq (lookup-key simply-kanban-mode-map "i") 'simply-kanban-clock-in))
   (should (eq (lookup-key simply-kanban-mode-map "o") 'simply-kanban-clock-out))
   (should (eq (lookup-key simply-kanban-mode-map "S") 'simply-kanban-set-sprint-filter))
+  (should (eq (lookup-key simply-kanban-mode-map "C") 'simply-kanban-clear-sprint-filter))
   (should (eq (lookup-key simply-kanban-mode-map "n") 'simply-kanban-next-card)))
 
 (defun sk-test--header-line-string ()

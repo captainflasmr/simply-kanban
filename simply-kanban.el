@@ -47,21 +47,25 @@
 ;;
 ;;   n / p          next / previous card
 ;;   TAB / S-TAB    next / previous column   (also f / b)
-;;   } / S-right    advance card to the next stage
-;;   { / S-left     send card back a stage
+;;   }              advance card to the next stage
+;;   {              send card back a stage
 ;;   s              set status (choose any stage)
 ;;   RET            reveal the heading (focus stays on the board)
 ;;   k              delete the heading (with confirmation)
 ;;   t              filter board by tag
 ;;   T              clear tag filter
 ;;   S              filter board by sprint (SPRINT property)
+;;   C              clear sprint filter
 ;;   :              set the Org tags on the card at point
 ;;   ,              set the Org priority of the card at point
 ;;   ;              set the Org effort estimate on the card at point
 ;;   P              set the story points on the card at point
 ;;   #              set the sprint (SPRINT property) on the card at point
+;;   i / o          clock in the card at point / clock out
 ;;   e              toggle the body of the card at point
 ;;   E              toggle the body of every card
+;;   N              add a timestamped note to the card at point
+;;   L              toggle the card's LOGBOOK drawer
 ;;   l              set the max card-title length (empty = no limit)
 ;;   F              toggle follow mode
 ;;   B              switch board (multi-board files only)
@@ -2006,6 +2010,7 @@ share the same `simply-kanban-marker' text property."
     (define-key map (kbd "t") #'simply-kanban-set-tag-filter)
     (define-key map (kbd "T") #'simply-kanban-clear-tag-filter)
     (define-key map (kbd "S") #'simply-kanban-set-sprint-filter)
+    (define-key map (kbd "C") #'simply-kanban-clear-sprint-filter)
     (define-key map (kbd ":") #'simply-kanban-set-tags)
     (define-key map (kbd ",") #'simply-kanban-set-priority)
     (define-key map (kbd ";") #'simply-kanban-set-effort)
