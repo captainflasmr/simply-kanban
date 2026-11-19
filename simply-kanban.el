@@ -1876,7 +1876,6 @@ Uses the plain header-line foreground so it reads well on any theme."
                    ""))
           "   "
           (:eval (propertize "{}" 'face 'help-key-binding)) " move  "
-          (:eval (propertize "s" 'face 'help-key-binding)) " status  "
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
           (:eval (propertize "N" 'face 'help-key-binding)) " note  "
           (:eval (propertize "L" 'face 'help-key-binding)) " log  "
@@ -1884,8 +1883,7 @@ Uses the plain header-line foreground so it reads well on any theme."
           (:eval (propertize ";" 'face 'help-key-binding)) " effort  "
           (:eval (propertize "i/o" 'face 'help-key-binding)) " clock  "
           (:eval (propertize "#" 'face 'help-key-binding)) " sprint  "
-          (:eval (propertize "S" 'face 'help-key-binding)) " sprint-filter  "
-          (:eval (propertize "q" 'face 'help-key-binding)) " quit"))
+          (:eval (propertize "S" 'face 'help-key-binding)) " sprint-filter"))
   (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t))
 
 ;;; Transient menu

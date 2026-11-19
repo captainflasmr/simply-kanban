@@ -706,7 +706,9 @@ BODY runs with `board' current."
         (let ((line (sk-test--header-line-string)))
           (should (string-prefix-p " [sprint: 2]  [clock: 1:30]  F follow"
                                    line))
-          (should-not (string-match-p "SPC" line)))))))
+          (should-not (string-match-p "SPC" line))
+          (should-not (string-match-p "status" line))
+          (should-not (string-match-p "quit" line)))))))
 
 ;;; Dynamic column width
 
