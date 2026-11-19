@@ -2114,8 +2114,6 @@ Used to build the board buffer name."
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
           (:eval (propertize "N" 'face 'help-key-binding)) " note  "
           (:eval (propertize "L" 'face 'help-key-binding)) " log  "
-          (:eval (propertize ":" 'face 'help-key-binding)) " tags  "
-          (:eval (propertize ";" 'face 'help-key-binding)) " effort  "
           (:eval (propertize "i/o" 'face 'help-key-binding)) " clock  "
           (:eval (propertize "#" 'face 'help-key-binding)) " sprint  "
           (:eval (propertize "S" 'face 'help-key-binding)) " sprint-filter"))
