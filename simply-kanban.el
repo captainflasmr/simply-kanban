@@ -58,6 +58,7 @@
 ;;   :              set the Org tags on the card at point
 ;;   ,              set the Org priority of the card at point
 ;;   ;              set the Org effort estimate on the card at point
+;;   P              set the story points on the card at point
 ;;   #              set the sprint (SPRINT property) on the card at point
 ;;   e              toggle the body of the card at point
 ;;   E              toggle the body of every card
@@ -131,6 +132,14 @@ open at once."
 The estimate is read from the card heading's `Effort' property (the value
 Org's \\[org-set-effort] sets); cards without one show nothing.  The column
 header then appends the summed effort of its cards in brackets."
+  :type 'boolean
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-show-story-points t
+  "When non-nil, show each card's story points and a per-column total.
+Story points are read from the card heading's `STORY_POINTS' property; cards
+without one show nothing.  The column header then appends the summed story
+points of its cards."
   :type 'boolean
   :group 'simply-kanban)
 
@@ -268,6 +277,11 @@ height other than 1.0, which would break the board's monospace alignment."
 (defface simply-kanban-effort
   '((t :inherit org-special-keyword))
   "Face for the effort estimate badge shown on a card and column total."
+  :group 'simply-kanban)
+
+(defface simply-kanban-points
+  '((t :inherit org-special-keyword))
+  "Face for the story-points badge shown on a card and column total."
   :group 'simply-kanban)
 
 (defface simply-kanban-clock
@@ -462,6 +476,13 @@ instead, unless that ancestor carries a SPRINT property of its own."
         (when (and prop (not (string-empty-p (string-trim prop))))
           (string-trim prop)))))
 
+(defun simply-kanban--story-points ()
+  "Return the STORY_POINTS property of the entry at point as a number, or nil."
+  (let ((s (org-entry-get nil "STORY_POINTS")))
+    (when (and s (string-match-p
+                  "\\`[ \t]*[0-9]+\\(?:\\.[0-9]+\\)?[ \t]*\\'" s))
+      (string-to-number s))))
+
 (defun simply-kanban--active-clock-heading-position ()
   "Return the position of the heading with the running clock, or nil."
   (when (and (org-clock-is-active)
@@ -498,8 +519,9 @@ The value includes the currently running clock interval, if any."
 
 (defun simply-kanban--collect-tasks (buffer &optional restrict)
   "Collect TODO entries from Org BUFFER as a list of card plists.
-Each plist has :keyword :title :body :logbook :priority :tags :effort :clocked
-:clocking :remaining :over :done :sprint :file :board :marker.  :clocked is the
+Each plist has :keyword :title :body :logbook :priority :tags :effort :points
+:clocked :clocking :remaining :over :done :sprint :file :board :marker.  :points
+is the heading's `STORY_POINTS' as a number.  :clocked is the
 heading's clocked minutes (including a running clock) and :clocking is
 non-nil for the active clock.  :remaining is the estimate left after clocked
 time, :over is the clocked time beyond the estimate, and :done is non-nil
@@ -526,6 +548,8 @@ RESTRICT limits which entries become cards:
                                  (= (org-current-level) 1)))
                     (let* ((comps (org-heading-components))
                            (effort (org-entry-get nil "Effort"))
+                           (points (and simply-kanban-show-story-points
+                                        (simply-kanban--story-points)))
                            (clocked (and simply-kanban-show-clock
                                          (simply-kanban--clocked-minutes)))
                            (done (and kw (member kw org-done-keywords) t))
@@ -545,6 +569,7 @@ RESTRICT limits which entries become cards:
                                   :priority (nth 3 comps)
                                   :tags (org-get-tags nil t)
                                   :effort effort
+                                  :points points
                                   :clocked clocked
                                   :clocking (and simply-kanban-show-clock
                                                  (simply-kanban--clocking-p))
@@ -782,6 +807,23 @@ zero minutes is \"0m\"."
     (when (or (> mins 0) (null parts)) (push (format "%dm" mins) parts))
     (mapconcat #'identity (nreverse parts) " ")))
 
+(defun simply-kanban--format-points (points)
+  "Return POINTS formatted without a trailing .0."
+  (if (and (floatp points) (= points (truncate points)))
+      (number-to-string (truncate points))
+    (number-to-string points)))
+
+(defun simply-kanban--column-points (tasks)
+  "Return the summed story points of TASKS as a string, or nil when none set."
+  (let ((total 0)
+        (any nil))
+    (dolist (task tasks)
+      (let ((points (plist-get task :points)))
+        (when points
+          (setq any t
+                total (+ total points)))))
+    (when any (simply-kanban--format-points total))))
+
 (defun simply-kanban--column-effort (tasks)
   "Return the summed effort of TASKS as a duration string, or nil when none set."
   (let ((total (cl-reduce
@@ -855,8 +897,9 @@ it already fits; otherwise it is cut to the limit with an ellipsis appended."
 (defun simply-kanban--format-card (task width)
   "Return compact card lines for TASK fitting WIDTH.
 A card shows its title prefixed by a priority cookie when one is set, then
-its tags (when any), its sprint (when no sprint filter is active), its effort
-estimate, its clocked, remaining, and over-budget time when present, and --
+its tags (when any), its sprint (when no sprint filter is active), its
+effort estimate, its story points, its clocked, remaining, and over-budget
+time when present, and --
 in an aggregated board -- its board (when showing all boards in a file) or
 source file.  The
 title is truncated to `simply-kanban--title-length' unless the card is
@@ -890,6 +933,12 @@ full title is shown and the Org body follows below a divider."
          (effort-line (when (and effort (not (string-empty-p effort)))
                         (propertize (concat "Effort: " effort)
                                     'face 'simply-kanban-effort)))
+         (points (and simply-kanban-show-story-points
+                      (plist-get task :points)))
+         (points-line (when points
+                        (propertize
+                         (format "Points: %s" (simply-kanban--format-points points))
+                         'face 'simply-kanban-points)))
          (clocked (and simply-kanban-show-clock (plist-get task :clocked)))
          (clocking (and simply-kanban-show-clock (plist-get task :clocking)))
          (clock-line (when (and (or clocking (> (or clocked 0) 0)))
@@ -948,6 +997,8 @@ full title is shown and the Org body follows below a divider."
       (push (funcall box sline) lines))
     (when effort-line
       (push (funcall box effort-line) lines))
+    (when points-line
+      (push (funcall box points-line) lines))
     (when clock-line
       (push (funcall box clock-line) lines))
     (dolist (oline over-lines)
@@ -998,6 +1049,8 @@ Each returned string is exactly WIDTH columns wide."
                                    (simply-kanban--priority-order (plist-get b :priority)))))
                       col-tasks))
          (header-face (simply-kanban--keyword-face keyword))
+         (points-total (and simply-kanban-show-story-points
+                            (simply-kanban--column-points col-tasks)))
          (effort-total (and simply-kanban-show-effort
                             (simply-kanban--column-effort col-tasks)))
          (clock-total (and simply-kanban-show-clock
@@ -1014,6 +1067,7 @@ Each returned string is exactly WIDTH columns wide."
          (progress (and simply-kanban-show-column-progress
                         (simply-kanban--column-progress col-tasks)))
          (header (propertize (concat (format " %s (%d)" keyword (length col-tasks))
+                                     (when points-total (format " (%s pts)" points-total))
                                      (when effort-total (format " [%s]" effort-total))
                                      (when clock-total (format " {%s}" clock-total))
                                      (when remaining-total
@@ -1406,6 +1460,32 @@ Candidates are the keywords of the card's own Org file."
       (simply-kanban--maybe-save (marker-buffer marker))
       (simply-kanban-refresh)
       (simply-kanban--goto-marker marker))))
+
+(defun simply-kanban-set-story-points ()
+  "Set the STORY_POINTS property of the card at point.
+Empty input removes the property."
+  (interactive)
+  (let ((marker (simply-kanban--marker-at-point)))
+    (if (not (and marker (buffer-live-p (marker-buffer marker))))
+        (message "Point is not on a card")
+      (let ((input (string-trim
+                    (read-string "Story points (empty = remove): "))))
+        (unless (or (string-empty-p input)
+                    (string-match-p "\\`[0-9]+\\(?:\\.[0-9]+\\)?\\'" input))
+          (user-error "Story points must be a non-negative number"))
+        (with-current-buffer (marker-buffer marker)
+          (org-with-wide-buffer
+           (goto-char marker)
+           (org-back-to-heading t)
+           (if (string-empty-p input)
+               (org-delete-property "STORY_POINTS")
+             (org-set-property "STORY_POINTS" input))))
+        (simply-kanban--maybe-save (marker-buffer marker))
+        (simply-kanban-refresh)
+        (simply-kanban--goto-marker marker)
+        (if (string-empty-p input)
+            (message "Story points cleared")
+          (message "Story points: %s" input))))))
 
 (defun simply-kanban-clock-in ()
   "Clock in the card at point."
@@ -1929,6 +2009,7 @@ share the same `simply-kanban-marker' text property."
     (define-key map (kbd ":") #'simply-kanban-set-tags)
     (define-key map (kbd ",") #'simply-kanban-set-priority)
     (define-key map (kbd ";") #'simply-kanban-set-effort)
+    (define-key map (kbd "P") #'simply-kanban-set-story-points)
     (define-key map (kbd "N") #'simply-kanban-add-note)
     (define-key map (kbd "L") #'simply-kanban-toggle-logbook)
     (define-key map (kbd "#") #'simply-kanban-set-sprint)
@@ -2065,6 +2146,7 @@ Used to build the board buffer name."
     ("," "set priority"    simply-kanban-set-priority)
     (":" "set tags"        simply-kanban-set-tags)
     (";" "set effort"      simply-kanban-set-effort)
+    ("P" "story points"    simply-kanban-set-story-points)
     ("N" "add note"        simply-kanban-add-note)
     ("#" "set sprint"      simply-kanban-set-sprint)
     ("k" "delete card"     simply-kanban-delete)]
@@ -2196,6 +2278,7 @@ workflow and is written back to that file."
     (when (and state sprint)
       (let* ((effort (simply-kanban--effort-minutes
                       (org-entry-get nil "Effort" t)))
+             (points (or (simply-kanban--story-points) 0))
              (done (and (member state org-done-keywords) t))
              (clocked (simply-kanban--clocked-minutes))
              (burned (if done
@@ -2205,12 +2288,13 @@ workflow and is written back to that file."
               (or effort 0)
               (if done 1 0)
               clocked
-              burned)))))
+              burned
+              points)))))
 
 (defun simply-kanban--sprint-summary-rows (&optional scope)
   "Return sprint summary table rows for SCOPE.
 SCOPE is `file' (the default) or `subtree'.  Each row is
-\(SPRINT TASKS DONE PROGRESS ESTIMATE ACTUAL REMAINING)."
+\(SPRINT TASKS DONE POINTS PROGRESS ESTIMATE ACTUAL REMAINING)."
   (let ((scope (or scope 'file)))
     (org-with-wide-buffer
      (org-clock-sum)
@@ -2221,7 +2305,8 @@ SCOPE is `file' (the default) or `subtree'.  Each row is
                     nil
                     (if (eq scope 'subtree) 'tree 'file))))
             (by-sprint (seq-group-by #'car data)))
-       (cons '("Sprint" "Tasks" "Done" "Progress" "Estimate" "Actual" "Remaining")
+       (cons '("Sprint" "Tasks" "Done" "Points" "Progress" "Estimate"
+               "Actual" "Remaining")
              (mapcar
               (lambda (entry)
                 (let* ((sprint (car entry))
@@ -2230,8 +2315,10 @@ SCOPE is `file' (the default) or `subtree'.  Each row is
                        (done (cl-reduce #'+ rows :key #'cl-third :initial-value 0))
                        (effort (cl-reduce #'+ rows :key #'cl-second :initial-value 0))
                        (clocked (cl-reduce #'+ rows :key #'cl-fourth :initial-value 0))
-                       (burned (cl-reduce #'+ rows :key #'cl-fifth :initial-value 0)))
+                       (burned (cl-reduce #'+ rows :key #'cl-fifth :initial-value 0))
+                       (points (cl-reduce #'+ rows :key #'cl-sixth :initial-value 0)))
                   (list sprint tasks done
+                        (simply-kanban--format-points points)
                         (format "%d%%"
                                 (if (zerop effort) 0
                                   (round (* 100.0 (/ burned (float effort))))))

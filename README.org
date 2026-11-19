@@ -61,6 +61,7 @@ The board buffer's name identifies its source, and the header line shows the sta
 | =:=       | set the Org tags on the card at point                |
 | =,=       | set the Org priority of the card at point            |
 | =;=       | set the Org effort estimate on the card at point     |
+| =P=       | set the story points on the card at point            |
 | =i=       | clock in the card at point                           |
 | =o=       | clock out the running clock                          |
 | =#=       | set the sprint (=SPRINT= property) on the card        |
@@ -87,7 +88,7 @@ To rebind it, e.g.:
   (define-key org-mode-map (kbd "C-c k") #'simply-kanban-show-card))
 #+end_src
 
-Cards are deliberately compact so you can fit many per window: a card shows its title (prefixed by a priority cookie such as =[#A]= only when one is set), its tags when present, and its Org effort estimate as =Effort: 2:00= when the heading carries an =Effort= property.  In an aggregated board it also shows its source file (=» file=).  Press =;= to set the effort with Org's native prompt (=org-set-effort=); each column header then sums its cards' efforts in brackets (=[2:00]=), giving a Jira-style per-stage workload total.  Cards with clock entries also show =Clocked: 1:30=; a running clock adds =(run)=.  Once a card has clocked time it also shows =Remaining: 1d 3h 42m=, calculated as Effort minus clocked time (floored at zero); a card whose clocked time exceeds its estimate instead shows =Over: 30m= in the warning face.  Press =i= to clock in the card at point and =o= to clock out the running clock.  Set =simply-kanban-show-clock-total= to add each column's clocked total in braces (={1:30}=) after the effort total, =simply-kanban-show-remaining-total= to add its remaining total in angle brackets (=<1d 3h 42m>=), and =simply-kanban-show-over-total= to add its over-budget total after an exclamation mark (=!30m=).  Press =e= to expand a card and show the heading's body text inline.  When you reveal a heading with =RET= (or while follow mode is on) the target heading line briefly pulses, and focus stays on the board.
+Cards are deliberately compact so you can fit many per window: a card shows its title (prefixed by a priority cookie such as =[#A]= only when one is set), its tags when present, and its Org effort estimate as =Effort: 2:00= when the heading carries an =Effort= property.  In an aggregated board it also shows its source file (=» file=).  Press =;= to set the effort with Org's native prompt (=org-set-effort=); each column header then sums its cards' efforts in brackets (=[2:00]=), giving a Jira-style per-stage workload total.  Story points live in the =STORY_POINTS= property: press =P= to set them, a card shows =Points: 5=, and each column header sums its cards' points in parentheses (=(8 pts)=).  Cards with clock entries also show =Clocked: 1:30=; a running clock adds =(run)=.  Once a card has clocked time it also shows =Remaining: 1d 3h 42m=, calculated as Effort minus clocked time (floored at zero); a card whose clocked time exceeds its estimate instead shows =Over: 30m= in the warning face.  Press =i= to clock in the card at point and =o= to clock out the running clock.  Set =simply-kanban-show-clock-total= to add each column's clocked total in braces (={1:30}=) after the effort total, =simply-kanban-show-remaining-total= to add its remaining total in angle brackets (=<1d 3h 42m>=), and =simply-kanban-show-over-total= to add its over-budget total after an exclamation mark (=!30m=).  Press =e= to expand a card and show the heading's body text inline.  When you reveal a heading with =RET= (or while follow mode is on) the target heading line briefly pulses, and focus stays on the board.
 
 * Multiple boards in one file
 
@@ -151,7 +152,7 @@ The package provides a dynamic block that summarises all cards by sprint:
 ,#+END:
 #+end_src
 
-Each row reports the sprint, task count, done count, effort-weighted progress, estimate, actual clocked time, and remaining estimate.  Durations use the Jira-style day/hour/minute format and the source buffer's =org-duration-units=.  Recompute the block with =C-c C-c=, or update it alongside other dynamic blocks with =M-x org-update-all-dblocks=.  The default scope is the whole file; use =:scope subtree= to limit it to the current subtree.
+Each row reports the sprint, task count, done count, story points, effort-weighted progress, estimate, actual clocked time, and remaining estimate.  Durations use the Jira-style day/hour/minute format and the source buffer's =org-duration-units=.  Recompute the block with =C-c C-c=, or update it alongside other dynamic blocks with =M-x org-update-all-dblocks=.  The default scope is the whole file; use =:scope subtree= to limit it to the current subtree.
 
 * Clocking
 
@@ -185,6 +186,7 @@ The divider under each column header is a progress bar.  Filled blocks show the 
 - =simply-kanban-auto-refresh= (default =t=) — refresh the board automatically whenever its source Org buffer is saved.
 - =simply-kanban-sort-by-priority= (default =nil=) — when non-nil, sort cards within each column by priority (A > B > C > none).
 - =simply-kanban-show-effort= (default =t=) — show each card's Org =Effort= estimate (=Effort: 2:00=) and sum each column's efforts in brackets (=[2:00]=) in its header.
+- =simply-kanban-show-story-points= (default =t=) — show each card's =STORY_POINTS= (=Points: 5=) and sum each column's points in parentheses (=(8 pts)=) in its header.
 - =simply-kanban-show-clock= (default =t=) — show each card's clocked time (=Clocked: 1:30=) and mark a running clock with =(run)=.
 - =simply-kanban-show-clock-total= (default =nil=) — append each column's summed clocked time in braces (={1:30}=) after its effort total.
 - =simply-kanban-show-remaining= (default =t=) — show =Remaining: 1d 3h 42m= on cards that have clocked time.
@@ -200,7 +202,7 @@ The divider under each column header is a progress bar.  Filled blocks show the 
 - =simply-kanban-all-boards= (default =t=) — in a multi-board file, offer an aggregate board (in the chooser and =B=) showing every board's cards at once, each card denoting its board.
 - =simply-kanban-all-boards-name= (default ="All Boards"=) — name of that aggregate entry.
 
-Faces: =simply-kanban-current-card= (focused card), =simply-kanban-running-card= (card with the running clock), =simply-kanban-tag= (card tags), =simply-kanban-effort= (effort badge and column total), =simply-kanban-clock= (clocked-time badge), =simply-kanban-remaining= (remaining-time badge), =simply-kanban-over= (over-budget badge), =simply-kanban-sprint= (sprint badge), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
+Faces: =simply-kanban-current-card= (focused card), =simply-kanban-running-card= (card with the running clock), =simply-kanban-tag= (card tags), =simply-kanban-effort= (effort badge and column total), =simply-kanban-points= (story-points badge and column total), =simply-kanban-clock= (clocked-time badge), =simply-kanban-remaining= (remaining-time badge), =simply-kanban-over= (over-budget badge), =simply-kanban-sprint= (sprint badge), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
 
 * Kanban Feature Comparison Matrix
 
@@ -218,6 +220,7 @@ A cross-cutting view of how Simply Kanban sits among the other kanban options fo
 | Tag filtering                   | No         | No        | No         | Yes           |
 | Priority cookies shown          | No         | No        | Partial    | Yes           |
 | Effort estimate + column total  | No         | No        | No         | Yes           |
+| Story points + column total     | No         | No        | No         | Yes           |
 | Clocked time on cards           | No         | No        | No         | Yes           |
 | Remaining time on cards         | No         | No        | No         | Yes           |
 | Over-budget indicator           | No         | No        | No         | Yes           |

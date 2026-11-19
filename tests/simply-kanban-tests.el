@@ -109,6 +109,47 @@
     (should (cl-some (lambda (l) (string-match-p "1:00" l)) with))
     (should-not (cl-some (lambda (l) (string-match-p "1:00" l)) without))))
 
+(ert-deftest sk-test-format-points ()
+  "Story points render without a redundant trailing .0."
+  (should (equal "3" (simply-kanban--format-points 3)))
+  (should (equal "3" (simply-kanban--format-points 3.0)))
+  (should (equal "3.5" (simply-kanban--format-points 3.5))))
+
+(ert-deftest sk-test-collect-story-points ()
+  "`--collect-tasks' reads STORY_POINTS as a number, ignoring invalid text."
+  (sk-test-with-org (concat "* TODO Alpha\n:PROPERTIES:\n:STORY_POINTS: 5\n:END:\n"
+                            "* TODO Beta\n:PROPERTIES:\n:STORY_POINTS: 3.5\n:END:\n"
+                            "* TODO Gamma\n:PROPERTIES:\n:STORY_POINTS: many\n:END:\n")
+    (let ((tasks (simply-kanban--collect-tasks src)))
+      (should (= 5 (plist-get (car tasks) :points)))
+      (should (= 3.5 (plist-get (cadr tasks) :points)))
+      (should (null (plist-get (nth 2 tasks) :points))))))
+
+(ert-deftest sk-test-column-points ()
+  "`--column-points' sums the cards' story points, nil when none are set."
+  (should (equal "8.5"
+                 (simply-kanban--column-points
+                  (list (list :points 5) (list :points 3.5)
+                        (list :points nil)))))
+  (should (equal "0" (simply-kanban--column-points
+                      (list (list :points 0)))))
+  (should (null (simply-kanban--column-points
+                 (list (list :points nil))))))
+
+(ert-deftest sk-test-format-card-shows-points ()
+  "A card with story points renders a badge; the toggle hides it."
+  (let ((simply-kanban-show-story-points t))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :points 5) 24)))
+      (should (cl-some (lambda (l) (string-match-p "Points: 5" l)) lines)))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x") 24)))
+      (should-not (cl-some (lambda (l) (string-match-p "Points:" l)) lines))))
+  (let ((simply-kanban-show-story-points nil))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :points 5) 24)))
+      (should-not (cl-some (lambda (l) (string-match-p "Points:" l)) lines)))))
+
 (ert-deftest sk-test-collect-clocked ()
   "`--collect-tasks' reads clock entries into `:clocked' as minutes."
   (sk-test-with-org (concat "* TODO Parser\n"
@@ -709,6 +750,7 @@ BODY runs with `board' current."
   (should (eq (lookup-key simply-kanban-mode-map "T") 'simply-kanban-clear-tag-filter))
   (should (eq (lookup-key simply-kanban-mode-map "F") 'simply-kanban-toggle-follow))
   (should (eq (lookup-key simply-kanban-mode-map ";") 'simply-kanban-set-effort))
+  (should (eq (lookup-key simply-kanban-mode-map "P") 'simply-kanban-set-story-points))
   (should (eq (lookup-key simply-kanban-mode-map "#") 'simply-kanban-set-sprint))
   (should (eq (lookup-key simply-kanban-mode-map "i") 'simply-kanban-clock-in))
   (should (eq (lookup-key simply-kanban-mode-map "o") 'simply-kanban-clock-out))
@@ -775,6 +817,32 @@ BODY runs with `board' current."
       (re-search-forward "Parser")
       (org-back-to-heading t)
       (should (string= (org-entry-get nil "Effort") "1:00")))))
+
+(ert-deftest sk-test-set-story-points ()
+  "`simply-kanban-set-story-points' writes the property back to Org."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Parser\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "5")))
+      (simply-kanban-set-story-points))
+    (with-current-buffer src
+      (goto-char (point-min))
+      (re-search-forward "Parser")
+      (org-back-to-heading t)
+      (should (string= (org-entry-get nil "STORY_POINTS") "5")))))
+
+(ert-deftest sk-test-set-story-points-remove ()
+  "Empty input to `simply-kanban-set-story-points' removes the property."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Parser\n:PROPERTIES:\n:STORY_POINTS: 5\n:END:\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "")))
+      (simply-kanban-set-story-points))
+    (with-current-buffer src
+      (goto-char (point-min))
+      (re-search-forward "Parser")
+      (org-back-to-heading t)
+      (should (null (org-entry-get nil "STORY_POINTS"))))))
 
 (ert-deftest sk-test-clock-in-out ()
   "Clocking from a card updates Org and writes a CLOCK entry."
@@ -928,25 +996,25 @@ BODY runs with `board' current."
           "* Work breakdown\n"
           "** Sprint 8\n"
           "*** TODO A\n"
-          ":PROPERTIES:\n:SPRINT:   8\n:Effort:   1:00\n:END:\n"
+          ":PROPERTIES:\n:SPRINT:   8\n:Effort:   1:00\n:STORY_POINTS: 5\n:END:\n"
           ":LOGBOOK:\n"
           "CLOCK: [2026-01-01 Thu 09:00]--[2026-01-01 Thu 09:30] =>  0:30\n"
           ":END:\n"
           "*** DONE B\n"
-          ":PROPERTIES:\n:SPRINT:   8\n:Effort:   1:00\n:END:\n"
+          ":PROPERTIES:\n:SPRINT:   8\n:Effort:   1:00\n:STORY_POINTS: 3\n:END:\n"
           "** Sprint 9\n"
           "*** TODO C\n"
-          ":PROPERTIES:\n:SPRINT:   9\n:Effort:   2:00\n:END:\n"))
+          ":PROPERTIES:\n:SPRINT:   9\n:Effort:   2:00\n:STORY_POINTS: 8\n:END:\n"))
 
 (ert-deftest sk-test-sprint-summary-rows ()
   "`--sprint-summary-rows' aggregates tasks, done cards, and durations."
   (sk-test-with-org sk-test-sprint-summary-content
     (let ((rows (simply-kanban--sprint-summary-rows 'file)))
       (should (equal (car rows)
-                     '("Sprint" "Tasks" "Done" "Progress"
+                     '("Sprint" "Tasks" "Done" "Points" "Progress"
                        "Estimate" "Actual" "Remaining")))
-      (should (equal (nth 1 rows) '("8" 2 1 "75%" "2h" "30m" "30m")))
-      (should (equal (nth 2 rows) '("9" 1 0 "0%" "2h" "0m" "2h"))))))
+      (should (equal (nth 1 rows) '("8" 2 1 "8" "75%" "2h" "30m" "30m")))
+      (should (equal (nth 2 rows) '("9" 1 0 "8" "0%" "2h" "0m" "2h"))))))
 
 (ert-deftest sk-test-sprint-summary-dblock ()
   "The sprint summary dynamic block writes an aligned Org table."
@@ -961,9 +1029,9 @@ BODY runs with `board' current."
     (org-dblock-update)
     (goto-char (point-min))
     (should (re-search-forward
-             "| +8 +| +2 +| +1 +| +75% +| +2h +| +30m +| +30m +|" nil t))
+             "| +8 +| +2 +| +1 +| +8 +| +75% +| +2h +| +30m +| +30m +|" nil t))
     (should (re-search-forward
-             "| +9 +| +1 +| +0 +| +0% +| +2h +| +0m +| +2h +|" nil t))))
+             "| +9 +| +1 +| +0 +| +8 +| +0% +| +2h +| +0m +| +2h +|" nil t))))
 
 ;;; Delete card
 
