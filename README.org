@@ -54,7 +54,6 @@ A header-line shows the source and the key reminders.  Columns expand to fill th
 | =}= / ={= | advance / retreat card a stage                       |
 | =s=       | set status (choose any stage)                        |
 | =RET=     | reveal the heading (focus stays on the board)        |
-| =v=       | jump to the heading in another window                |
 | =k=       | delete the heading (with confirmation)               |
 | =t=       | filter board by tag                                  |
 | =T=       | clear tag filter                                     |
@@ -79,7 +78,7 @@ Press =SPC= (or =?=) for a =transient= menu grouping every command (Navigate / M
 
 The card at point is highlighted, and navigating moves the highlight onto the new card.
 
-To go the other way -- from a heading in the Org file to its card -- run =M-x simply-kanban-show-card= (bound to =C-c ;= in Org buffers) from the Org buffer.  It is the inverse of =RET= / =v=: it finds the heading at (or enclosing) point among the board's cards and selects that card, showing the board in another window while focus stays in the Org buffer.  The matched card is filled (face =simply-kanban-mark=) so you can see at a glance which card relates to the heading; that fill clears the moment you navigate to another card on the board.  If no board is open yet it creates one for the file first -- in a split to the right, so the original file stays visible on the left -- and the command always tries to take you to a card.
+To go the other way -- from a heading in the Org file to its card -- run =M-x simply-kanban-show-card= (bound to =C-c ;= in Org buffers) from the Org buffer.  It is the inverse of =RET=: it finds the heading at (or enclosing) point among the board's cards and selects that card, showing the board in another window while focus stays in the Org buffer.  The matched card is filled (face =simply-kanban-mark=) so you can see at a glance which card relates to the heading; that fill clears the moment you navigate to another card on the board.  If no board is open yet it creates one for the file first -- in a split to the right, so the original file stays visible on the left -- and the command always tries to take you to a card.
 
 To rebind it, e.g.:
 

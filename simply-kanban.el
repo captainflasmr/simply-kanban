@@ -38,7 +38,7 @@
 ;; Usage: open an Org file and M-x simply-kanban.
 ;;
 ;; From inside the Org file, M-x `simply-kanban-show-card' is the inverse of
-;; the board's `v'/RET: it finds the heading at point among the board's cards
+;; the board's RET: it finds the heading at point among the board's cards
 ;; and selects it, showing the board in another window while focus stays in the
 ;; Org buffer.  When no board is open it creates one first, so it always tries
 ;; to take you to a card.
@@ -49,7 +49,6 @@
 ;;   { / S-left     send card back a stage
 ;;   s              set status (choose any stage)
 ;;   RET            reveal the heading (focus stays on the board)
-;;   v              jump to the heading in another window
 ;;   k              delete the heading (with confirmation)
 ;;   t              filter board by tag
 ;;   T              clear tag filter
@@ -1552,21 +1551,6 @@ a card is expanded with \\[simply-kanban-toggle-expand]."
         (simply-kanban-refresh)
         (message "Deleted")))))
 
-(defun simply-kanban-jump-other-window ()
-  "Jump to the Org heading for the card at point in another window."
-  (interactive)
-  (let ((marker (simply-kanban--marker-at-point)))
-    (if (not (and marker (marker-buffer marker)))
-        (message "Point is not on a card")
-      (let ((buf (marker-buffer marker))
-            (pos marker))
-        (display-buffer buf '(display-buffer-pop-up-window (inhibit-same-window . t)))
-        (with-selected-window (get-buffer-window buf)
-          (goto-char pos)
-          (org-back-to-heading t)
-          (cond ((fboundp 'org-fold-show-entry) (org-fold-show-entry))
-                ((fboundp 'org-show-entry) (org-show-entry))))))))
-
 (defun simply-kanban--heading-markers-upward ()
   "Return markers for the Org heading at point and its ancestors, innermost first.
 Each marker sits at the start of a heading, so it can be matched against a
@@ -1810,7 +1794,6 @@ share the same `simply-kanban-marker' text property."
     (define-key map (kbd "TAB") #'simply-kanban-next-column)
     (define-key map (kbd "<backtab>") #'simply-kanban-prev-column)
     (define-key map (kbd "RET") #'simply-kanban-goto)
-    (define-key map (kbd "v") #'simply-kanban-jump-other-window)
     (define-key map (kbd "}") #'simply-kanban-advance)
     (define-key map (kbd "{") #'simply-kanban-retreat)
     (define-key map (kbd "s") #'simply-kanban-set-status)
@@ -1942,7 +1925,6 @@ Uses the plain header-line foreground so it reads well on any theme."
     ("o" "clock out"       simply-kanban-clock-out)]
    ["Reveal"
     ("RET" "reveal heading" simply-kanban-goto)
-    ("v" "other window"     simply-kanban-jump-other-window)
     ("e" "expand card"      simply-kanban-toggle-expand :transient t)
     ("E" "expand all"       simply-kanban-toggle-expand-all :transient t)
     ("L" "show logbook"     simply-kanban-toggle-logbook :transient t)

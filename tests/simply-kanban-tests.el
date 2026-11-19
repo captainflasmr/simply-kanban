@@ -674,7 +674,6 @@ BODY runs with `board' current."
   "The board keymap binds the core commands, aligned with simply-annotate."
   (should (keymapp simply-kanban-mode-map))
   (should (eq (lookup-key simply-kanban-mode-map (kbd "RET")) 'simply-kanban-goto))
-  (should (eq (lookup-key simply-kanban-mode-map "v") 'simply-kanban-jump-other-window))
   (should (eq (lookup-key simply-kanban-mode-map "}") 'simply-kanban-advance))
   (should (eq (lookup-key simply-kanban-mode-map "{") 'simply-kanban-retreat))
   (should (eq (lookup-key simply-kanban-mode-map "s") 'simply-kanban-set-status))
@@ -935,16 +934,6 @@ BODY runs with `board' current."
         (with-current-buffer (marker-buffer first-marker)
           (goto-char first-marker)
           (should (string-match-p "High" (org-get-heading t t t t))))))))
-
-;;; Jump to other window
-
-(ert-deftest sk-test-jump-other-window ()
-  "Jumping to source in another window runs without error."
-  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n"
-    (goto-char (point-min))
-    (simply-kanban-next-card)
-    (simply-kanban-jump-other-window)
-    t))
 
 (ert-deftest sk-test-show-card-finds-anchor ()
   "A heading's markers match its own card anchor on the board."
