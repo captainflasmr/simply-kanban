@@ -230,6 +230,11 @@ Offered in the board chooser when `simply-kanban-all-boards' is non-nil."
   "Face used to highlight the card at point."
   :group 'simply-kanban)
 
+(defface simply-kanban-running-card
+  '((t :inherit highlight))
+  "Face highlighting the card whose Org clock is running."
+  :group 'simply-kanban)
+
 (defface simply-kanban-tag
   '((t :inherit shadow))
   "Face for the tags shown on a card.
@@ -303,6 +308,12 @@ new files.")
 
 (defvar-local simply-kanban--current-card nil
   "The marker identifying the currently highlighted card.")
+
+(defvar-local simply-kanban--running-card nil
+  "The marker identifying the card with the running clock.")
+
+(defvar-local simply-kanban--running-overlays nil
+  "Overlays highlighting the card with the running clock.")
 
 (defvar-local simply-kanban--tag-filter nil
   "When non-nil, only show cards carrying this tag.")
@@ -1009,6 +1020,7 @@ file's buffer-local units."
 SPEC is resolved to a list of Org buffers via `simply-kanban--spec-buffers'.
 Columns expand to fill the board window (see `simply-kanban-min-column-width').
 Must be called with the board buffer current and its window selected."
+  (mapc #'delete-overlay simply-kanban--running-overlays)
   (let* ((inhibit-read-only t)
          (buffers (simply-kanban--spec-buffers spec))
          (simply-kanban--multi-source (> (length buffers) 1))
@@ -1045,7 +1057,9 @@ Must be called with the board buffer current and its window selected."
     (erase-buffer)
     (setq simply-kanban--source-spec spec
           simply-kanban--source-buffers buffers
-          simply-kanban--keywords keywords)
+          simply-kanban--keywords keywords
+          simply-kanban--running-card nil
+          simply-kanban--running-overlays nil)
     (if (null buffers)
         (insert "No source Org buffers.\n")
       (dotimes (row nrows)
@@ -1055,6 +1069,7 @@ Must be called with the board buffer current and its window selected."
                                 columns)))
           (insert (string-join segments gap) "\n"))))
     (simply-kanban--install-hooks (current-buffer) buffers)
+    (simply-kanban--highlight-running-card)
     (goto-char (point-min))
     (simply-kanban-next-card)))
 
@@ -1783,6 +1798,43 @@ share the same `simply-kanban-marker' text property."
             (overlay-put ov 'priority 100)
             (push ov simply-kanban--highlight-overlays)))))))
 
+(defun simply-kanban--running-card-marker ()
+  "Return the marker of the card with the running clock, or nil."
+  (let ((pos (simply-kanban--active-clock-heading-position)))
+    (when pos
+      (seq-some (lambda (anchor)
+                  (let ((marker (cdr anchor)))
+                    (and marker
+                         (marker-buffer marker)
+                         (eq (marker-buffer org-clock-marker) (marker-buffer marker))
+                         (= pos (marker-position marker))
+                         marker)))
+                (simply-kanban--anchors)))))
+
+(defun simply-kanban--highlight-running-card ()
+  "Highlight the card with the running clock, clearing any previous highlight."
+  (mapc #'delete-overlay simply-kanban--running-overlays)
+  (setq simply-kanban--running-overlays nil)
+  (let ((card (simply-kanban--running-card-marker)))
+    (setq simply-kanban--running-card card)
+    (dolist (region (simply-kanban--card-regions card))
+      (let ((ov (make-overlay (car region) (cdr region))))
+        (overlay-put ov 'face 'simply-kanban-running-card)
+        (overlay-put ov 'priority 90)
+        (push ov simply-kanban--running-overlays)))))
+
+(defun simply-kanban--sync-running-card ()
+  "Update the running-card highlight when the active clock changes."
+  (let ((pos (simply-kanban--active-clock-heading-position)))
+    (unless (if pos
+                (and simply-kanban--running-card
+                     (marker-buffer simply-kanban--running-card)
+                     (eq (marker-buffer org-clock-marker)
+                         (marker-buffer simply-kanban--running-card))
+                     (= pos (marker-position simply-kanban--running-card)))
+              (null simply-kanban--running-card))
+      (simply-kanban--highlight-running-card))))
+
 ;;; Mode
 
 (defvar simply-kanban-mode-map
@@ -1884,7 +1936,8 @@ Uses the plain header-line foreground so it reads well on any theme."
           (:eval (propertize "i/o" 'face 'help-key-binding)) " clock  "
           (:eval (propertize "#" 'face 'help-key-binding)) " sprint  "
           (:eval (propertize "S" 'face 'help-key-binding)) " sprint-filter"))
-  (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t))
+  (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t)
+  (add-hook 'post-command-hook #'simply-kanban--sync-running-card nil t))
 
 ;;; Transient menu
 

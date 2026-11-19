@@ -769,6 +769,28 @@ BODY runs with `board' current."
       (when (org-clock-is-active)
         (org-clock-out)))))
 
+(ert-deftest sk-test-highlight-running-card ()
+  "The card with the running clock is highlighted."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (unwind-protect
+        (progn
+          (simply-kanban-clock-in)
+          (should (simply-kanban--same-card-p
+                   simply-kanban--running-card
+                   (simply-kanban--marker-at-point)))
+          (should simply-kanban--running-overlays)
+          (should (seq-every-p
+                   (lambda (ov)
+                     (eq (overlay-get ov 'face) 'simply-kanban-running-card))
+                   simply-kanban--running-overlays))
+          (simply-kanban-clock-out)
+          (should-not simply-kanban--running-card)
+          (should-not simply-kanban--running-overlays))
+      (when (org-clock-is-active)
+        (org-clock-out)))))
+
 (ert-deftest sk-test-toggle-clock ()
   "Toggling clocking twice clocks the same card back out."
   (sk-test-with-board "#+TODO: TODO DOING | DONE\n\n* TODO Parser\n"
