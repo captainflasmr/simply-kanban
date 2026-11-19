@@ -181,17 +181,34 @@ count is used instead.  The empty portion uses the `shadow' face."
   :group 'simply-kanban)
 
 (defcustom simply-kanban-default-sprint nil
-  "Sprint number a board filters to when first opened, or nil for all sprints.
-A card's sprint is its `SPRINT' property (an integer, inherited from parent
-headings); set it from the board with \\[simply-kanban-set-sprint].  When this
-is an integer, opening a board shows only cards in that sprint; change the
+  "Sprint a board filters to when first opened, or nil for all sprints.
+A card's sprint is its `SPRINT' property, a string inherited from parent
+headings; set it from the board with \\[simply-kanban-set-sprint].  When this
+is non-nil, opening a board shows only cards in that sprint; change the
 displayed sprint at any time with \\[simply-kanban-set-sprint-filter] (empty
 input clears the filter).  When nil, boards open showing every sprint."
-  :type '(choice (const :tag "All sprints" nil) integer)
+  :type '(choice (const :tag "All sprints" nil) string)
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-sprint-from-heading nil
+  "When non-nil, derive a card's sprint from its nearest ancestor heading.
+The heading must not carry a TODO keyword, and its text becomes the sprint
+when the card has no `SPRINT' property.  This lets a file define sprints by
+section without adding properties to every card, for example:
+
+* Sprint 1
+** TODO Write the parser
+* Sprint 2
+** TODO Write the tests
+
+The nearest ancestor wins: a `SPRINT' property on a heading takes precedence
+over that heading's text, and a `SPRINT' property on the card itself always
+takes precedence."
+  :type 'boolean
   :group 'simply-kanban)
 
 (defcustom simply-kanban-show-sprint t
-  "When non-nil, show a card's SPRINT number on the board.
+  "When non-nil, show a card's sprint on the board.
 The badge is shown only while no sprint filter is active: once filtered to a
 single sprint every visible card shares it, so the badge would be redundant."
   :type 'boolean
@@ -325,8 +342,9 @@ new files.")
   "When non-nil, only show cards carrying this tag.")
 
 (defvar-local simply-kanban--sprint-filter nil
-  "When non-nil (an integer), only show cards in that sprint.
-A card's sprint is its `SPRINT' property.  Initialised from
+  "When non-nil (a string), only show cards in that sprint.
+A card's sprint is its `SPRINT' property, or an ancestor heading when
+`simply-kanban-sprint-from-heading' is non-nil.  Initialised from
 `simply-kanban-default-sprint' when a board is opened.")
 
 (defvar-local simply-kanban--expanded-cards nil
@@ -405,13 +423,44 @@ clock lines; text belonging to child headings is not included."
                  (buffer-substring-no-properties
                   contents-start contents-end))))))))))
 
+(defun simply-kanban--local-sprint ()
+  "Return the SPRINT property set directly on the entry at point, or nil."
+  (let ((prop (org-entry-get nil "SPRINT")))
+    (when (and prop (not (string-empty-p (string-trim prop))))
+      (string-trim prop))))
+
+(defun simply-kanban--sprint-from-ancestors ()
+  "Return the nearest ancestor's sprint property or heading text, or nil.
+Walks upward, preferring a SPRINT property set directly on each ancestor
+over that ancestor's heading text.  Only headings without a TODO keyword
+can supply their text."
+  (save-excursion
+    (let (sprint)
+      (while (and (not sprint)
+                  (ignore-errors (org-up-heading-safe)))
+        (setq sprint
+              (or (simply-kanban--local-sprint)
+                  (let ((title (string-trim
+                                (substring-no-properties
+                                 (or (org-get-heading t t t t) "")))))
+                    (and (not (org-get-todo-state))
+                         (not (string-empty-p title))
+                         title)))))
+      sprint)))
+
 (defun simply-kanban--read-sprint ()
-  "Return the SPRINT property of the Org entry at point as an integer, or nil.
-The property is read with inheritance, so a SPRINT set on a parent (e.g. a
-board container) applies to its cards.  Non-numeric values yield nil."
-  (let ((s (org-entry-get nil "SPRINT" t)))
-    (when (and s (string-match-p "\\`[ \t]*[0-9]+[ \t]*\\'" s))
-      (string-to-number s))))
+  "Return the sprint of the Org entry at point as a string, or nil.
+A SPRINT property set on the entry itself wins.  Otherwise the property is
+read with inheritance, so a SPRINT set on a parent (e.g. a board container)
+applies to its cards.  When `simply-kanban-sprint-from-heading' is non-nil,
+the nearest ancestor heading without a TODO keyword supplies the sprint
+instead, unless that ancestor carries a SPRINT property of its own."
+  (or (simply-kanban--local-sprint)
+      (and simply-kanban-sprint-from-heading
+           (simply-kanban--sprint-from-ancestors))
+      (let ((prop (org-entry-get nil "SPRINT" t)))
+        (when (and prop (not (string-empty-p (string-trim prop))))
+          (string-trim prop)))))
 
 (defun simply-kanban--active-clock-heading-position ()
   "Return the position of the heading with the running clock, or nil."
@@ -454,10 +503,10 @@ Each plist has :keyword :title :body :logbook :priority :tags :effort :clocked
 heading's clocked minutes (including a running clock) and :clocking is
 non-nil for the active clock.  :remaining is the estimate left after clocked
 time, :over is the clocked time beyond the estimate, and :done is non-nil
-for a done keyword.  :sprint is the heading's
-`SPRINT' property as an integer (nil when unset or non-numeric), inherited
-from parent headings.  :board is filled in only by
-`simply-kanban--collect-boards'.
+for a done keyword.  :sprint is the heading's sprint as a string (nil when
+unset), from the inherited `SPRINT' property or, when
+`simply-kanban-sprint-from-heading' is non-nil, the nearest ancestor heading.
+:board is filled in only by `simply-kanban--collect-boards'.
 RESTRICT limits which entries become cards:
   nil          -- every TODO heading in the buffer;
   a marker     -- only TODO headings in that heading's subtree;
@@ -832,9 +881,11 @@ full title is shown and the Org body follows below a divider."
          (sprint (and simply-kanban-show-sprint
                       (not simply-kanban--sprint-filter)
                       (plist-get task :sprint)))
-         (sprint-line (when sprint
-                        (propertize (format "Sprint: %d" sprint)
-                                    'face 'simply-kanban-sprint)))
+         (sprint-lines (when sprint
+                         (simply-kanban--wrap
+                          (propertize (format "Sprint: %s" sprint)
+                                      'face 'simply-kanban-sprint)
+                          inner)))
          (effort (and simply-kanban-show-effort (plist-get task :effort)))
          (effort-line (when (and effort (not (string-empty-p effort)))
                         (propertize (concat "Effort: " effort)
@@ -893,8 +944,8 @@ full title is shown and the Org body follows below a divider."
       (push (funcall box tl) lines))
     (dolist (tline tags-lines)
       (push (funcall box tline) lines))
-    (when sprint-line
-      (push (funcall box sprint-line) lines))
+    (dolist (sline sprint-lines)
+      (push (funcall box sline) lines))
     (when effort-line
       (push (funcall box effort-line) lines))
     (when clock-line
@@ -1049,7 +1100,8 @@ Must be called with the board buffer current and its window selected."
                   tasks))
          (tasks (if simply-kanban--sprint-filter
                     (cl-remove-if-not
-                     (lambda (tk) (eql simply-kanban--sprint-filter (plist-get tk :sprint)))
+                     (lambda (tk) (equal simply-kanban--sprint-filter
+                                         (plist-get tk :sprint)))
                      tasks)
                   tasks))
          (keywords (simply-kanban--merge-keywords buffers))
@@ -1478,16 +1530,24 @@ same card once the note is stored or cancelled."
   (simply-kanban-refresh)
   (message "Cleared tag filter"))
 
+(defun simply-kanban--sprint-lessp (a b)
+  "Return non-nil when sprint A should sort before sprint B.
+Whole-number sprints compare numerically; other values compare
+lexicographically."
+  (let ((na (and (string-match-p "\\`[0-9]+\\'" a) (string-to-number a)))
+        (nb (and (string-match-p "\\`[0-9]+\\'" b) (string-to-number b))))
+    (if (and na nb) (< na nb) (string< a b))))
+
 (defun simply-kanban-set-sprint ()
-  "Set the SPRINT property of the card at point to a chosen integer.
-Empty input removes the property, taking the card out of every sprint."
+  "Set the SPRINT property of the card at point to chosen text.
+Empty input removes the property; the card then falls back to an inherited
+SPRINT property or, when `simply-kanban-sprint-from-heading' is non-nil, its
+section heading."
   (interactive)
   (let ((marker (simply-kanban--marker-at-point)))
     (if (not (and marker (buffer-live-p (marker-buffer marker))))
         (message "Point is not on a card")
-      (let ((input (string-trim (read-string "Sprint number (empty = remove): "))))
-        (unless (or (string-empty-p input) (string-match-p "\\`[0-9]+\\'" input))
-          (user-error "Sprint must be a whole number"))
+      (let ((input (string-trim (read-string "Sprint (empty = remove): "))))
         (with-current-buffer (marker-buffer marker)
           (org-with-wide-buffer
            (goto-char marker)
@@ -1498,30 +1558,26 @@ Empty input removes the property, taking the card out of every sprint."
         (simply-kanban--maybe-save (marker-buffer marker))
         (simply-kanban-refresh)
         (simply-kanban--goto-marker marker)
-        (message (if (string-empty-p input) "Sprint cleared" "Sprint %s") input)))))
+        (if (string-empty-p input)
+            (message "Sprint property cleared")
+          (message "Sprint %s" input))))))
 
 (defun simply-kanban-set-sprint-filter ()
-  "Display only cards in a chosen sprint (their SPRINT property).
-Offers the sprint numbers present on the board for completion; empty input
-clears the filter and shows every sprint."
+  "Display only cards in a chosen sprint.
+Offers the sprint values present on the board for completion, and accepts
+any text; empty input clears the filter and shows every sprint."
   (interactive)
   (let* ((buffers (simply-kanban--spec-buffers simply-kanban--source-spec))
          (tasks (simply-kanban--collect-all buffers))
          (sprints (sort (delete-dups
                          (delq nil (mapcar (lambda (tk) (plist-get tk :sprint)) tasks)))
-                        #'<))
+                        #'simply-kanban--sprint-lessp))
          (input (string-trim
-                 (completing-read "Show sprint (empty = all): "
-                                  (mapcar #'number-to-string sprints) nil nil))))
-    (cond
-     ((string-empty-p input)
-      (setq simply-kanban--sprint-filter nil))
-     ((string-match-p "\\`[0-9]+\\'" input)
-      (setq simply-kanban--sprint-filter (string-to-number input)))
-     (t (user-error "Sprint must be a whole number")))
+                 (completing-read "Show sprint (empty = all): " sprints nil nil))))
+    (setq simply-kanban--sprint-filter (unless (string-empty-p input) input))
     (simply-kanban-refresh)
     (if simply-kanban--sprint-filter
-        (message "Sprint filter: %d" simply-kanban--sprint-filter)
+        (message "Sprint filter: %s" simply-kanban--sprint-filter)
       (message "Cleared sprint filter"))))
 
 (defun simply-kanban-clear-sprint-filter ()
@@ -1958,7 +2014,7 @@ Used to build the board buffer name."
           ;; Status indicators lead the header line so a narrow window
           ;; never hides them behind the key reminders.
           (:eval (if simply-kanban--sprint-filter
-                     (propertize (format "[sprint: %d]  " simply-kanban--sprint-filter)
+                     (propertize (format "[sprint: %s]  " simply-kanban--sprint-filter)
                                  'face 'warning)
                    ""))
           (:eval (when (org-clock-is-active)
@@ -1995,7 +2051,7 @@ Used to build the board buffer name."
               (format "   tag: %s" simply-kanban--tag-filter)
             "")
           (if simply-kanban--sprint-filter
-              (format "   sprint: %d" simply-kanban--sprint-filter)
+              (format "   sprint: %s" simply-kanban--sprint-filter)
             "")))
 
 ;;;###autoload (autoload 'simply-kanban-transient "simply-kanban" nil t)
@@ -2043,7 +2099,9 @@ to the window."
     (with-current-buffer buffer
       (unless (derived-mode-p 'simply-kanban-mode)
         (simply-kanban-mode))
-      (setq simply-kanban--sprint-filter simply-kanban-default-sprint
+      (setq simply-kanban--sprint-filter
+            (and simply-kanban-default-sprint
+                 (string-trim (format "%s" simply-kanban-default-sprint)))
             simply-kanban--title-length simply-kanban-max-title-length))
     (pop-to-buffer buffer)
     (simply-kanban--render spec)
@@ -2133,9 +2191,9 @@ workflow and is written back to that file."
 
 (defun simply-kanban--sprint-summary-entry ()
   "Return a sprint summary data row for the heading at point, or nil."
-  (let ((sprint (org-entry-get nil "SPRINT" t))
+  (let ((sprint (simply-kanban--read-sprint))
         (state (org-get-todo-state)))
-    (when (and state sprint (string-match-p "\\`[0-9]+\\'" sprint))
+    (when (and state sprint)
       (let* ((effort (simply-kanban--effort-minutes
                       (org-entry-get nil "Effort" t)))
              (done (and (member state org-done-keywords) t))
@@ -2143,7 +2201,7 @@ workflow and is written back to that file."
              (burned (if done
                          (or effort 0)
                        (min (or effort 0) clocked))))
-        (list (string-to-number sprint)
+        (list sprint
               (or effort 0)
               (if done 1 0)
               clocked
@@ -2180,7 +2238,9 @@ SCOPE is `file' (the default) or `subtree'.  Each row is
                         (simply-kanban--format-jira-duration effort)
                         (simply-kanban--format-jira-duration clocked)
                         (simply-kanban--format-jira-duration (- effort burned)))))
-              (sort by-sprint (lambda (a b) (< (car a) (car b))))))))))
+              (sort by-sprint
+                    (lambda (a b)
+                      (simply-kanban--sprint-lessp (car a) (car b))))))))))
 
 ;;;###autoload
 (defun org-dblock-write:simply-kanban-sprint-summary (params)

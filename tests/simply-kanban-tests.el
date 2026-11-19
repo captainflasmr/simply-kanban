@@ -425,29 +425,56 @@
 
 (ert-deftest sk-test-collect-sprint ()
   "`--collect-tasks' reads the heading's SPRINT property into `:sprint'."
-  (sk-test-with-org (concat "* TODO Alpha\n:PROPERTIES:\n:SPRINT: 3\n:END:\n"
+  (sk-test-with-org (concat "* TODO Alpha\n:PROPERTIES:\n:SPRINT: Sprint Alpha\n:END:\n"
                             "* TODO Beta\n")
     (let ((tasks (simply-kanban--collect-tasks src)))
-      (should (eql 3 (plist-get (car tasks) :sprint)))
+      (should (equal "Sprint Alpha" (plist-get (car tasks) :sprint)))
       (should (null (plist-get (cadr tasks) :sprint))))))
 
 (ert-deftest sk-test-sprint-inheritance ()
   "A SPRINT on a parent heading is inherited by its cards."
-  (sk-test-with-org (concat "* Project Alpha\n:PROPERTIES:\n:SPRINT: 5\n:END:\n"
+  (sk-test-with-org (concat "* Project Alpha\n:PROPERTIES:\n:SPRINT: Sprint 5\n:END:\n"
                             "** TODO design\n")
     (let ((tasks (simply-kanban--collect-tasks src)))
-      (should (eql 5 (plist-get (car tasks) :sprint))))))
+      (should (equal "Sprint 5" (plist-get (car tasks) :sprint))))))
+
+(ert-deftest sk-test-sprint-from-heading ()
+  "An ancestor heading names a card's sprint when the option is on."
+  (sk-test-with-org (concat "* Sprint Alpha\n** TODO one\n"
+                            "* Sprint Beta\n** TODO two\n")
+    (let ((simply-kanban-sprint-from-heading t))
+      (let ((tasks (simply-kanban--collect-tasks src)))
+        (should (equal "Sprint Alpha" (plist-get (car tasks) :sprint)))
+        (should (equal "Sprint Beta" (plist-get (cadr tasks) :sprint)))))))
+
+(ert-deftest sk-test-sprint-property-beats-heading ()
+  "A SPRINT property on the same ancestor beats that heading's text."
+  (sk-test-with-org (concat "* Sprint Alpha\n:PROPERTIES:\n"
+                            ":SPRINT: Explicit\n:END:\n"
+                            "** TODO one\n")
+    (let ((simply-kanban-sprint-from-heading t))
+      (let ((tasks (simply-kanban--collect-tasks src)))
+        (should (equal "Explicit" (plist-get (car tasks) :sprint)))))))
+
+(ert-deftest sk-test-sprint-nearest-heading-wins ()
+  "A closer section heading beats a SPRINT property on a higher ancestor."
+  (sk-test-with-org (concat "* Issues\n:PROPERTIES:\n:SPRINT: Global\n:END:\n"
+                            "** Emacs\n*** TODO one\n")
+    (let ((simply-kanban-sprint-from-heading t))
+      (let ((tasks (simply-kanban--collect-tasks src)))
+        (should (equal "Emacs" (plist-get (car tasks) :sprint)))))))
 
 (ert-deftest sk-test-format-card-shows-sprint ()
   "A card shows its sprint when no sprint filter is active, hidden otherwise."
   (let ((simply-kanban--sprint-filter nil))
     (let ((lines (simply-kanban--format-card
-                  (list :keyword "TODO" :title "x" :sprint 2) 24)))
-      (should (cl-some (lambda (l) (string-match-p "Sprint: 2" l)) lines))))
-  (let ((simply-kanban--sprint-filter 2))
+                  (list :keyword "TODO" :title "x" :sprint "Sprint 2") 24)))
+      (should (cl-some (lambda (l) (string-match-p "Sprint: Sprint 2" l)) lines))))
+  (let ((simply-kanban--sprint-filter "Sprint 2"))
     (let ((lines (simply-kanban--format-card
-                  (list :keyword "TODO" :title "x" :sprint 2) 24)))
-      (should-not (cl-some (lambda (l) (string-match-p "Sprint: 2" l)) lines)))))
+                  (list :keyword "TODO" :title "x" :sprint "Sprint 2") 24)))
+      (should-not (cl-some (lambda (l) (string-match-p "Sprint: Sprint 2" l))
+                           lines)))))
 
 ;;; Rendering / navigation
 
@@ -700,7 +727,7 @@ BODY runs with `board' current."
 (ert-deftest sk-test-header-line-indicators-first ()
   "The sprint and clock indicators lead the header line."
   (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO a\n"
-    (let ((simply-kanban--sprint-filter 2))
+    (let ((simply-kanban--sprint-filter "2"))
       (cl-letf (((symbol-function 'org-clock-is-active) (lambda () t))
                 ((symbol-function 'org-clock-get-clocked-time) (lambda () 90)))
         (let ((line (sk-test--header-line-string)))
@@ -831,16 +858,22 @@ BODY runs with `board' current."
 
 ;;; Sprints
 
+(ert-deftest sk-test-sprint-lessp ()
+  "Numeric sprints sort numerically; text sprints lexicographically."
+  (should (simply-kanban--sprint-lessp "2" "10"))
+  (should (simply-kanban--sprint-lessp "Alpha" "Beta"))
+  (should-not (simply-kanban--sprint-lessp "10" "2")))
+
 (ert-deftest sk-test-sprint-filter ()
-  "A sprint filter shows only cards whose SPRINT property matches."
+  "A sprint filter shows only cards whose sprint text matches."
   (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
-                              "* TODO Alpha\n:PROPERTIES:\n:SPRINT: 1\n:END:\n"
-                              "* TODO Beta\n:PROPERTIES:\n:SPRINT: 2\n:END:\n"
-                              "* TODO Gamma\n:PROPERTIES:\n:SPRINT: 1\n:END:\n")
+                              "* TODO Alpha\n:PROPERTIES:\n:SPRINT: Sprint 1\n:END:\n"
+                              "* TODO Beta\n:PROPERTIES:\n:SPRINT: Sprint 2\n:END:\n"
+                              "* TODO Gamma\n:PROPERTIES:\n:SPRINT: Sprint 1\n:END:\n")
     (goto-char (point-min))
     (simply-kanban-next-card)
     (should (= 3 (length (simply-kanban--anchors))))
-    (setq simply-kanban--sprint-filter 1)
+    (setq simply-kanban--sprint-filter "Sprint 1")
     (simply-kanban-refresh)
     (should (= 2 (length (simply-kanban--anchors))))
     (setq simply-kanban--sprint-filter nil)
@@ -848,17 +881,17 @@ BODY runs with `board' current."
     (should (= 3 (length (simply-kanban--anchors))))))
 
 (ert-deftest sk-test-set-sprint ()
-  "`simply-kanban-set-sprint' writes the SPRINT property back to Org."
+  "`simply-kanban-set-sprint' writes any sprint text back to Org."
   (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n"
     (goto-char (point-min))
     (simply-kanban-next-card)
-    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "4")))
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "Sprint Alpha")))
       (simply-kanban-set-sprint))
     (with-current-buffer src
       (goto-char (point-min))
       (re-search-forward "Alpha")
       (org-back-to-heading t)
-      (should (string= (org-entry-get nil "SPRINT") "4")))))
+      (should (string= (org-entry-get nil "SPRINT") "Sprint Alpha")))))
 
 (ert-deftest sk-test-set-sprint-remove ()
   "Empty input to `simply-kanban-set-sprint' removes the SPRINT property."
@@ -875,7 +908,7 @@ BODY runs with `board' current."
 
 (ert-deftest sk-test-default-sprint-on-open ()
   "Opening a board honours `simply-kanban-default-sprint'."
-  (let ((simply-kanban-default-sprint 1))
+  (let ((simply-kanban-default-sprint "1"))
     (sk-test-with-org (concat "* TODO Alpha\n:PROPERTIES:\n:SPRINT: 1\n:END:\n"
                               "* TODO Beta\n:PROPERTIES:\n:SPRINT: 2\n:END:\n")
       (let (board)
@@ -883,7 +916,7 @@ BODY runs with `board' current."
             (progn
               (setq board (simply-kanban))
               (with-current-buffer board
-                (should (eql 1 simply-kanban--sprint-filter))
+                (should (equal "1" simply-kanban--sprint-filter))
                 (should (= 1 (length (simply-kanban--anchors))))))
           (when (buffer-live-p board)
             (kill-buffer board)))))))
@@ -912,8 +945,8 @@ BODY runs with `board' current."
       (should (equal (car rows)
                      '("Sprint" "Tasks" "Done" "Progress"
                        "Estimate" "Actual" "Remaining")))
-      (should (equal (nth 1 rows) '(8 2 1 "75%" "2h" "30m" "30m")))
-      (should (equal (nth 2 rows) '(9 1 0 "0%" "2h" "0m" "2h"))))))
+      (should (equal (nth 1 rows) '("8" 2 1 "75%" "2h" "30m" "30m")))
+      (should (equal (nth 2 rows) '("9" 1 0 "0%" "2h" "0m" "2h"))))))
 
 (ert-deftest sk-test-sprint-summary-dblock ()
   "The sprint summary dynamic block writes an aligned Org table."
