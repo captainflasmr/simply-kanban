@@ -1892,7 +1892,6 @@ Uses the plain header-line foreground so it reads well on any theme."
                      (propertize (format "  [tag: %s]" simply-kanban--tag-filter) 'face 'success)
                    ""))
           "   "
-          (:eval (propertize "SPC" 'face 'help-key-binding)) " menu  "
           (:eval (propertize "{}" 'face 'help-key-binding)) " move  "
           (:eval (propertize "s" 'face 'help-key-binding)) " status  "
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "

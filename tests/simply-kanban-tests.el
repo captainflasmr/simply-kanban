@@ -704,8 +704,10 @@ BODY runs with `board' current."
     (let ((simply-kanban--sprint-filter 2))
       (cl-letf (((symbol-function 'org-clock-is-active) (lambda () t))
                 ((symbol-function 'org-clock-get-clocked-time) (lambda () 90)))
-        (should (string-prefix-p " [sprint: 2]  [clock: 1:30]  F follow"
-                                 (sk-test--header-line-string)))))))
+        (let ((line (sk-test--header-line-string)))
+          (should (string-prefix-p " [sprint: 2]  [clock: 1:30]  F follow"
+                                   line))
+          (should-not (string-match-p "SPC" line)))))))
 
 ;;; Dynamic column width
 

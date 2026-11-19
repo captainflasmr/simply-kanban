@@ -27,6 +27,7 @@ The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]
 ** Changed
 
 - The active sprint filter and running clock now lead the board's header line, ahead of the follow indicator and key reminders, so a narrow window shows them first.
+- The board's header line no longer shows the ~SPC menu~ hint; the transient menu is still available with ~SPC~ or ~?~.
 
 * [0.4.0] - 2026-05-31
 
