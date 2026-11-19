@@ -24,6 +24,10 @@ The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]
 - Over-budget indicator: a card whose clocked time exceeds its estimate shows ~Over: 30m~ (face ~simply-kanban-over~, inheriting ~warning~) instead of ~Remaining: 0m~.  ~simply-kanban-show-over-total~ (default ~nil~) appends each column's summed over-budget time after an exclamation mark (~!30m~).
 - Notes and logbook from the board: ~N~ adds a timestamped note to the card at point with Org's native note prompt, and boards refresh from ~org-after-note-stored-hook~ once the note is stored.  The board stays visible while the note is written: the source Org buffer and ~*Org Note*~ open in side windows, and an around-advice on ~org-store-log-note~ returns to the annotated card after storing or cancelling.  ~L~ toggles the card's ~LOGBOOK~ drawer on the board, showing clock entries and drawer notes below a ~Logbook~ divider.  ~e~ now strips ~LOGBOOK~ drawers and ~CLOCK~ lines from the expanded body, so it shows notes and prose without the clock log.
 
+** Changed
+
+- The active sprint filter and running clock now lead the board's header line, ahead of the follow indicator and key reminders, so a narrow window shows them first.
+
 * [0.4.0] - 2026-05-31
 
 ** Added

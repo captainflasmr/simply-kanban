@@ -689,6 +689,24 @@ BODY runs with `board' current."
   (should (eq (lookup-key simply-kanban-mode-map "S") 'simply-kanban-set-sprint-filter))
   (should (eq (lookup-key simply-kanban-mode-map "n") 'simply-kanban-next-card)))
 
+(defun sk-test--header-line-string ()
+  "Evaluate the board's `header-line-format' to a plain string."
+  (mapconcat (lambda (piece)
+               (cond ((stringp piece) piece)
+                     ((and (consp piece) (eq (car piece) :eval))
+                      (or (eval (cadr piece) t) ""))
+                     (t "")))
+             header-line-format ""))
+
+(ert-deftest sk-test-header-line-indicators-first ()
+  "The sprint and clock indicators lead the header line."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO a\n"
+    (let ((simply-kanban--sprint-filter 2))
+      (cl-letf (((symbol-function 'org-clock-is-active) (lambda () t))
+                ((symbol-function 'org-clock-get-clocked-time) (lambda () 90)))
+        (should (string-prefix-p " [sprint: 2]  [clock: 1:30]  F follow"
+                                 (sk-test--header-line-string)))))))
+
 ;;; Dynamic column width
 
 (ert-deftest sk-test-column-width ()
