@@ -187,7 +187,7 @@ The divider under each column header is a progress bar.  Filled blocks show the 
 
 * Card progress
 
-Each card with progress data also carries its own bar, drawn with the same filled (=█=) and empty (=░=) blocks as the column divider.  A =DONE= card is fully filled, while any other card is filled by its clocked time against its =Effort= estimate, capped at fully complete.  Cards without an effort estimate show no bar unless they are =DONE=.  The filled portion uses the card's TODO-keyword colour and the empty portion uses the =shadow= face.
+Each card with progress data also carries its own bar, drawn with the same filled (=█=) and empty (=░=) blocks as the column divider.  A =DONE= card is fully filled, while any other card is filled by its clocked time against its =Effort= estimate, capped at fully complete.  Cards without an effort estimate, or with an estimate but no clocked time, show no bar unless they are =DONE=, so an untouched card never displays an empty bar.  The filled portion uses the card's TODO-keyword colour and the empty portion uses the =shadow= face.
 
 - =simply-kanban-show-card-progress= (default =t=) — show the per-card progress bar; set it to =nil= to hide it.
 

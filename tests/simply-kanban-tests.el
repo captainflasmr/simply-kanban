@@ -472,8 +472,8 @@
                   (list :effort "2:00" :clocked 60))))
   (should (= 1.0 (simply-kanban--card-progress
                   (list :effort "2:00" :clocked 300))))
-  (should (= 0.0 (simply-kanban--card-progress
-                  (list :effort "2:00" :clocked 0))))
+  (should-not (simply-kanban--card-progress
+               (list :effort "2:00" :clocked 0)))
   (should-not (simply-kanban--card-progress (list :clocked 60))))
 
 (ert-deftest sk-test-card-progress-renders ()
@@ -495,6 +495,15 @@
   (let ((simply-kanban-show-column-progress nil))
     (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n"
       (should-not (string-match-p "█" (buffer-string))))))
+
+(ert-deftest sk-test-card-progress-hidden-without-clock ()
+  "A card with an estimate but no clocked time shows no empty progress bar."
+  (let ((simply-kanban-show-column-progress nil))
+    (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                                "* TODO Alpha\n"
+                                ":PROPERTIES:\n:Effort:   2:00\n:END:\n")
+      (should-not (string-match-p "█" (buffer-string)))
+      (should-not (string-match-p "░" (buffer-string))))))
 
 (ert-deftest sk-test-format-jira-duration ()
   "Remaining time renders with Jira-style day/hour/minute units."

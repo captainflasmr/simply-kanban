@@ -213,9 +213,9 @@ count is used instead.  The empty portion uses the `shadow' face."
 The bar uses the same filled and empty blocks as the column progress
 indicators.  A DONE card is fully filled; any other card is filled by its
 clocked time against its effort estimate, capped at fully complete.  Cards
-without an effort estimate show no bar unless they are DONE.  The filled
-portion uses the card's TODO-keyword face and the empty portion uses the
-`shadow' face."
+without an effort estimate, or without clocked time, show no bar unless they
+are DONE.  The filled portion uses the card's TODO-keyword face and the empty
+portion uses the `shadow' face."
   :type 'boolean
   :group 'simply-kanban)
 
@@ -922,12 +922,15 @@ done-card count when no efforts are set."
 (defun simply-kanban--card-progress (task)
   "Return TASK's completed fraction of its effort estimate, or nil.
 A DONE task is fully complete.  Any other task is its clocked time divided
-by its effort estimate, capped at 1.0.  Tasks without an effort estimate
-have no progress data unless they are DONE."
-  (let ((effort (simply-kanban--effort-minutes (plist-get task :effort))))
+by its effort estimate, capped at 1.0.  Tasks without an effort estimate or
+without any clocked time have no progress data unless they are DONE, so they
+show no empty progress bar."
+  (let ((effort (simply-kanban--effort-minutes (plist-get task :effort)))
+        (clocked (plist-get task :clocked)))
     (cond
      ((plist-get task :done) 1.0)
-     (effort (/ (min effort (or (plist-get task :clocked) 0)) (float effort)))
+     ((and effort clocked (> clocked 0))
+      (/ (min effort clocked) (float effort)))
      (t nil))))
 
 (defun simply-kanban--progress-bar (fraction width face)
