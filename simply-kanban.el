@@ -1631,7 +1631,7 @@ section heading."
   (let ((marker (simply-kanban--marker-at-point)))
     (if (not (and marker (buffer-live-p (marker-buffer marker))))
         (message "Point is not on a card")
-      (let ((input (string-trim (read-string "Sprint (empty = remove): "))))
+      (let ((input (string-trim (read-string "Card sprint (empty = remove): "))))
         (with-current-buffer (marker-buffer marker)
           (org-with-wide-buffer
            (goto-char marker)
@@ -2120,7 +2120,7 @@ Used to build the board buffer name."
           (:eval (propertize "N" 'face 'help-key-binding)) " note  "
           (:eval (propertize "L" 'face 'help-key-binding)) " log  "
           (:eval (propertize "i/o" 'face 'help-key-binding)) " clock  "
-          (:eval (propertize "#" 'face 'help-key-binding)) " sprint  "
+          (:eval (propertize "#" 'face 'help-key-binding)) " card sprint  "
           (:eval (propertize "S" 'face 'help-key-binding)) " sprint-filter"))
   (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t)
   (add-hook 'post-command-hook #'simply-kanban--sync-running-card nil t))
@@ -2151,7 +2151,7 @@ Used to build the board buffer name."
     (";" "set effort"      simply-kanban-set-effort)
     ("P" "story points"    simply-kanban-set-story-points)
     ("N" "add note"        simply-kanban-add-note)
-    ("#" "set sprint"      simply-kanban-set-sprint)
+    ("#" "set card sprint" simply-kanban-set-sprint)
     ("k" "delete card"     simply-kanban-delete)]
    ["Clock"
     ("i" "clock in"        simply-kanban-clock-in)
@@ -2166,7 +2166,7 @@ Used to build the board buffer name."
     ("t" "filter by tag"    simply-kanban-set-tag-filter)
     ("T" "clear tag filter" simply-kanban-clear-tag-filter :transient t)
     ("S" "filter by sprint" simply-kanban-set-sprint-filter)
-    ("C" "clear sprint"     simply-kanban-clear-sprint-filter :transient t)
+    ("C" "clear sprint filter" simply-kanban-clear-sprint-filter :transient t)
     ("B" "switch board"     simply-kanban-switch-board)
     ("l" "title length"     simply-kanban-set-title-length)
     ("g" "refresh"          simply-kanban-refresh :transient t)
