@@ -67,6 +67,7 @@
 ;;   E              toggle the body of every card
 ;;   N              add a timestamped note to the card at point
 ;;   L              toggle the card's LOGBOOK drawer
+;;   c              toggle compact (single-line metadata) cards
 ;;   l              set the max card-title length (empty = no limit)
 ;;   F              toggle follow mode
 ;;   B              switch board (multi-board files only)
@@ -111,6 +112,19 @@ board stays compact; the full title is restored when the card is expanded with
 the current board with \\[simply-kanban-set-title-length] when it feels too
 verbose."
   :type '(choice (const :tag "No limit" nil) integer)
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-compact-cards t
+  "When non-nil, condense each card's metadata onto a single line.
+The line lists the board and source-file markers when present, then effort,
+story points, clocked time, remaining (or over-budget) time, sprint value,
+and tags, omitting values the card does not have.  Numeric values carry no
+labels; their order and face identify them.  Durations use colon-separated
+units (for example 1d:1h:23m), the sprint value appears without a label, and
+the line is truncated with an ellipsis when it does not fit.  The title and
+progress bar keep their own lines.  Toggle the current board with
+\\[simply-kanban-toggle-compact]."
+  :type 'boolean
   :group 'simply-kanban)
 
 (defcustom simply-kanban-buffer-name "*Simply Kanban*"
@@ -387,6 +401,11 @@ A card's sprint is its `SPRINT' property, or an ancestor heading when
   "Maximum characters of a card title shown on this board, or nil for no limit.
 Initialised from `simply-kanban-max-title-length' when the board opens; change
 it live with \\[simply-kanban-set-title-length].")
+
+(defvar-local simply-kanban--compact-cards t
+  "When non-nil, this board shows each card's metadata on a single line.
+Initialised from `simply-kanban-compact-cards' when the board opens; toggle
+it live with \\[simply-kanban-toggle-compact].")
 
 (defvar simply-kanban--multi-source nil
   "Bound non-nil while rendering a board that spans more than one file.
@@ -823,6 +842,14 @@ zero minutes is \"0m\"."
     (when (or (> mins 0) (null parts)) (push (format "%dm" mins) parts))
     (mapconcat #'identity (nreverse parts) " ")))
 
+(defun simply-kanban--format-compact-duration (minutes)
+  "Return MINUTES as a compact duration such as \"1d:1h:23m\".
+The day length comes from `org-duration-units'.  Zero components are omitted;
+zero minutes is \"0m\"."
+  (replace-regexp-in-string
+   " " ":"
+   (simply-kanban--format-jira-duration minutes)))
+
 (defun simply-kanban--format-points (points)
   "Return POINTS formatted without a trailing .0."
   (if (and (floatp points) (= points (truncate points)))
@@ -921,17 +948,26 @@ it already fits; otherwise it is cut to the limit with an ellipsis appended."
         (concat (substring title 0 limit) "…")
       title)))
 
+(defun simply-kanban--fit-line (text width)
+  "Return TEXT fitting WIDTH columns, truncating with an ellipsis if needed."
+  (if (<= (string-width text) width)
+      text
+    (concat (truncate-string-to-width text (max 0 (1- width))) "…")))
+
 (defun simply-kanban--format-card (task width)
-  "Return compact card lines for TASK fitting WIDTH.
+  "Return card lines for TASK fitting WIDTH.
 A card shows its title prefixed by a priority cookie when one is set, then
-its tags (when any), its sprint (when no sprint filter is active), its
-effort estimate, its story points, its clocked, remaining, and over-budget
-time when present, a progress bar when it has progress data, and --
-in an aggregated board -- its board (when showing all boards in a file) or
-source file.  The
-title is truncated to `simply-kanban--title-length' unless the card is
-expanded.  When the card is expanded (see `simply-kanban--expanded-cards') the
-full title is shown and the Org body follows below a divider."
+its metadata and, when the card has progress data, a progress bar.  By
+default the metadata is condensed onto one line listing the board and
+source-file markers when present, then effort, story points, clocked time,
+remaining or over-budget time, sprint, and tags, omitting values the card
+lacks.  Numeric values are unlabelled and separated by spaces; durations use
+colon-separated units and the sprint value appears without a label.  With
+`simply-kanban--compact-cards' nil each value gets its own labelled line
+instead.  The title is truncated to
+`simply-kanban--title-length' unless the card is expanded.  When the card is
+expanded (see `simply-kanban--expanded-cards') the full title is shown and
+the Org body follows below a divider."
   (let* ((inner (max 1 (- width 4)))
          (keyword (plist-get task :keyword))
          (border-face (simply-kanban--keyword-face keyword))
@@ -943,58 +979,77 @@ full title is shown and the Org body follows below a divider."
          (title-text (if prio-cookie (concat prio-cookie " " title) title))
          (title-lines (simply-kanban--wrap title-text inner))
          (tags (plist-get task :tags))
-         (tags-lines (when tags
-                       (simply-kanban--wrap
-                        (propertize (concat ":" (mapconcat #'identity tags ":") ":")
-                                    'face 'simply-kanban-tag)
-                        inner)))
+         (tags-badge (when tags
+                       (propertize (concat ":" (mapconcat #'identity tags ":") ":")
+                                   'face 'simply-kanban-tag)))
+         (tags-lines (when tags-badge
+                       (simply-kanban--wrap tags-badge inner)))
          (sprint (and simply-kanban-show-sprint
                       (not simply-kanban--sprint-filter)
                       (plist-get task :sprint)))
-         (sprint-lines (when sprint
-                         (simply-kanban--wrap
-                          (propertize (format "Sprint: %s" sprint)
-                                      'face 'simply-kanban-sprint)
-                          inner)))
+         (sprint-badge (when sprint
+                         (propertize (format "Sprint: %s" sprint)
+                                     'face 'simply-kanban-sprint)))
+         (sprint-compact (when sprint
+                           (propertize sprint 'face 'simply-kanban-sprint)))
+         (sprint-lines (when sprint-badge
+                         (simply-kanban--wrap sprint-badge inner)))
          (effort (and simply-kanban-show-effort (plist-get task :effort)))
-         (effort-line (when (and effort (not (string-empty-p effort)))
-                        (propertize (concat "Effort: " effort)
+         (effort-value (and effort (not (string-empty-p effort)) effort))
+         (effort-line (when effort-value
+                        (propertize (concat "Effort: " effort-value)
                                     'face 'simply-kanban-effort)))
+         (effort-compact (when effort-value
+                           (propertize effort-value 'face 'simply-kanban-effort)))
          (points (and simply-kanban-show-story-points
                       (plist-get task :points)))
-         (points-line (when points
-                        (propertize
-                         (format "Points: %s" (simply-kanban--format-points points))
-                         'face 'simply-kanban-points)))
+         (points-value (when points (simply-kanban--format-points points)))
+         (points-line (when points-value
+                        (propertize (concat "Points: " points-value)
+                                    'face 'simply-kanban-points)))
+         (points-compact (when points-value
+                           (propertize points-value 'face 'simply-kanban-points)))
          (clocked (and simply-kanban-show-clock (plist-get task :clocked)))
          (clocking (and simply-kanban-show-clock (plist-get task :clocking)))
-         (clock-line (when (and (or clocking (> (or clocked 0) 0)))
-                       (propertize
-                        (concat "Clocked: "
-                                (simply-kanban--format-effort (or clocked 0))
-                                (when clocking " (run)"))
-                        'face 'simply-kanban-clock)))
+         (clock-value (when (or clocking (> (or clocked 0) 0))
+                        (concat (simply-kanban--format-effort (or clocked 0))
+                                (when clocking " (run)"))))
+         (clock-line (when clock-value
+                       (propertize (concat "Clocked: " clock-value)
+                                   'face 'simply-kanban-clock)))
+         (clock-compact (when clock-value
+                          (propertize
+                           (concat (simply-kanban--format-compact-duration
+                                    (or clocked 0))
+                                   (when clocking " (run)"))
+                           'face 'simply-kanban-clock)))
          (over (and simply-kanban-show-remaining (plist-get task :over)))
-         (over-lines
-          (when (and over (> over 0))
-            (simply-kanban--wrap
-             (propertize
-              (concat "Over: "
-                      (simply-kanban--format-jira-duration over))
-              'face 'simply-kanban-over)
-             inner)))
+         (over-value (when (and over (> over 0))
+                       (simply-kanban--format-jira-duration over)))
+         (over-lines (when over-value
+                       (simply-kanban--wrap
+                        (propertize (concat "Over: " over-value)
+                                    'face 'simply-kanban-over)
+                        inner)))
+         (over-compact (when over-value
+                         (propertize
+                          (concat "+" (simply-kanban--format-compact-duration over))
+                          'face 'simply-kanban-over)))
          (remaining (and simply-kanban-show-remaining
                          (plist-get task :remaining)))
-         (remaining-lines
-          (when (and remaining
-                     (null over-lines)
-                     (or clocking (> (or clocked 0) 0)))
-            (simply-kanban--wrap
-             (propertize
-              (concat "Remaining: "
-                      (simply-kanban--format-jira-duration remaining))
-              'face 'simply-kanban-remaining)
-             inner)))
+         (remaining-value (when (and remaining
+                                     (null over-value)
+                                     (or clocking (> (or clocked 0) 0)))
+                            (simply-kanban--format-jira-duration remaining)))
+         (remaining-lines (when remaining-value
+                            (simply-kanban--wrap
+                             (propertize (concat "Remaining: " remaining-value)
+                                         'face 'simply-kanban-remaining)
+                             inner)))
+         (remaining-compact (when remaining-value
+                              (propertize
+                               (simply-kanban--format-compact-duration remaining)
+                               'face 'simply-kanban-remaining)))
          (progress (and simply-kanban-show-card-progress
                         (simply-kanban--card-progress task)))
          (progress-line (when progress
@@ -1005,6 +1060,21 @@ full title is shown and the Org body follows below a divider."
          (file-line (when simply-kanban--multi-source
                       (propertize (concat "» " (or (plist-get task :file) "org"))
                                   'face 'shadow)))
+         (compact-meta
+          (when simply-kanban--compact-cards
+            (delq nil
+                  (list board-line
+                        file-line
+                        effort-compact
+                        points-compact
+                        clock-compact
+                        (or over-compact remaining-compact)
+                        sprint-compact
+                        tags-badge))))
+         (compact-line (when compact-meta
+                         (simply-kanban--fit-line
+                          (mapconcat #'identity compact-meta " ")
+                          inner)))
          (body (and expanded (plist-get task :body)))
          (logbook (and (simply-kanban--card-logbook-p marker)
                        (plist-get task :logbook)))
@@ -1022,26 +1092,30 @@ full title is shown and the Org body follows below a divider."
     (push (funcall rule "┌" "┐") lines)
     (dolist (tl title-lines)
       (push (funcall box tl) lines))
-    (dolist (tline tags-lines)
-      (push (funcall box tline) lines))
-    (dolist (sline sprint-lines)
-      (push (funcall box sline) lines))
-    (when effort-line
-      (push (funcall box effort-line) lines))
-    (when points-line
-      (push (funcall box points-line) lines))
-    (when clock-line
-      (push (funcall box clock-line) lines))
-    (dolist (oline over-lines)
-      (push (funcall box oline) lines))
-    (dolist (rline remaining-lines)
-      (push (funcall box rline) lines))
+    (if simply-kanban--compact-cards
+        (when compact-line
+          (push (funcall box compact-line) lines))
+      (dolist (tline tags-lines)
+        (push (funcall box tline) lines))
+      (dolist (sline sprint-lines)
+        (push (funcall box sline) lines))
+      (when effort-line
+        (push (funcall box effort-line) lines))
+      (when points-line
+        (push (funcall box points-line) lines))
+      (when clock-line
+        (push (funcall box clock-line) lines))
+      (dolist (oline over-lines)
+        (push (funcall box oline) lines))
+      (dolist (rline remaining-lines)
+        (push (funcall box rline) lines)))
     (when progress-line
       (push (funcall box progress-line) lines))
-    (when board-line
-      (push (funcall box board-line) lines))
-    (when file-line
-      (push (funcall box file-line) lines))
+    (unless simply-kanban--compact-cards
+      (when board-line
+        (push (funcall box board-line) lines))
+      (when file-line
+        (push (funcall box file-line) lines)))
     (when body
       (push (funcall rule "├" "┤") lines)
       (dolist (raw (split-string body "\n"))
@@ -1724,6 +1798,16 @@ a card is expanded with \\[simply-kanban-toggle-expand]."
         (message "Title length: %d" simply-kanban--title-length)
       (message "Title length: unlimited"))))
 
+(defun simply-kanban-toggle-compact ()
+  "Toggle single-line metadata on the current board's cards."
+  (interactive)
+  (unless (derived-mode-p 'simply-kanban-mode)
+    (user-error "Not in a kanban board"))
+  (setq simply-kanban--compact-cards (not simply-kanban--compact-cards))
+  (simply-kanban-refresh)
+  (message "Compact cards %s"
+           (if simply-kanban--compact-cards "enabled" "disabled")))
+
 (defun simply-kanban-delete ()
   "Delete the Org heading for the card at point."
   (interactive)
@@ -2075,6 +2159,7 @@ share the same `simply-kanban-marker' text property."
     (define-key map (kbd "P") #'simply-kanban-set-story-points)
     (define-key map (kbd "N") #'simply-kanban-add-note)
     (define-key map (kbd "L") #'simply-kanban-toggle-logbook)
+    (define-key map (kbd "c") #'simply-kanban-toggle-compact)
     (define-key map (kbd "#") #'simply-kanban-set-sprint)
     (define-key map (kbd "i") #'simply-kanban-clock-in)
     (define-key map (kbd "o") #'simply-kanban-clock-out)
@@ -2175,6 +2260,7 @@ Used to build the board buffer name."
           "   "
           (:eval (propertize "{}" 'face 'help-key-binding)) " move  "
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
+          (:eval (propertize "c" 'face 'help-key-binding)) " compact  "
           (:eval (propertize "N" 'face 'help-key-binding)) " note  "
           (:eval (propertize "L" 'face 'help-key-binding)) " log  "
           (:eval (propertize "i/o" 'face 'help-key-binding)) " clock  "
@@ -2219,6 +2305,7 @@ Used to build the board buffer name."
     ("e" "expand card"      simply-kanban-toggle-expand :transient t)
     ("E" "expand all"       simply-kanban-toggle-expand-all :transient t)
     ("L" "show logbook"     simply-kanban-toggle-logbook :transient t)
+    ("c" "compact cards"    simply-kanban-toggle-compact :transient t)
     ("F" "follow mode"      simply-kanban-toggle-follow :transient t)]
    ["Board"
     ("t" "filter by tag"    simply-kanban-set-tag-filter)
@@ -2245,7 +2332,8 @@ to the window."
       (setq simply-kanban--sprint-filter
             (and simply-kanban-default-sprint
                  (string-trim (format "%s" simply-kanban-default-sprint)))
-            simply-kanban--title-length simply-kanban-max-title-length))
+            simply-kanban--title-length simply-kanban-max-title-length
+            simply-kanban--compact-cards simply-kanban-compact-cards))
     (pop-to-buffer buffer)
     (simply-kanban--render spec)
     buffer))
