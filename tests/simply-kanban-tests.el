@@ -1063,6 +1063,21 @@ BODY runs with `board' current."
       (when (org-clock-is-active)
         (org-clock-out)))))
 
+(ert-deftest sk-test-running-card-title-uppercase ()
+  "The running card's title is uppercase and reverts on clock-out."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (unwind-protect
+        (progn
+          (simply-kanban-clock-in)
+          (should (string-match-p "ALPHA" (buffer-string)))
+          (should (string-match-p "Beta" (buffer-string)))
+          (simply-kanban-clock-out)
+          (should (string-match-p "Alpha" (buffer-string))))
+      (when (org-clock-is-active)
+        (org-clock-out)))))
+
 (ert-deftest sk-test-toggle-clock ()
   "Toggling clocking twice clocks the same card back out."
   (sk-test-with-board "#+TODO: TODO DOING | DONE\n\n* TODO Parser\n"

@@ -379,6 +379,9 @@ new files.")
 (defvar-local simply-kanban--running-card nil
   "The marker identifying the card with the running clock.")
 
+(defvar-local simply-kanban--running-clock-state nil
+  "Last observed active clock, as (BUFFER . POSITION), or nil.")
+
 (defvar-local simply-kanban--running-overlays nil
   "Overlays drawing the double-line outline of the running card.")
 
@@ -536,6 +539,12 @@ instead, unless that ancestor carries a SPRINT property of its own."
         (ignore-errors (org-back-to-heading t))
         (when (org-at-heading-p) (point))))))
 
+(defun simply-kanban--clock-state ()
+  "Return the active clock's source buffer and heading position, or nil."
+  (let ((pos (simply-kanban--active-clock-heading-position)))
+    (when pos
+      (cons (marker-buffer org-clock-marker) pos))))
+
 (defun simply-kanban--clocking-p ()
   "Return non-nil when the heading at point has the running clock."
   (let ((pos (simply-kanban--active-clock-heading-position)))
@@ -562,15 +571,16 @@ The value includes the currently running clock interval, if any."
 (defun simply-kanban--collect-tasks (buffer &optional restrict)
   "Collect TODO entries from Org BUFFER as a list of card plists.
 Each plist has :keyword :title :body :logbook :priority :tags :effort :points
-:clocked :clocking :remaining :over :done :sprint :file :board :marker.  :points
-is the heading's `STORY_POINTS' as a number.  :clocked is the
-heading's clocked minutes (including a running clock) and :clocking is
-non-nil for the active clock.  :remaining is the estimate left after clocked
-time, :over is the clocked time beyond the estimate, and :done is non-nil
-for a done keyword.  :sprint is the heading's sprint as a string (nil when
-unset), from the inherited `SPRINT' property or, when
-`simply-kanban-sprint-from-heading' is non-nil, the nearest ancestor heading.
-:board is filled in only by `simply-kanban--collect-boards'.
+:clocked :clocking :running :remaining :over :done :sprint :file :board
+:marker.  :points is the heading's `STORY_POINTS' as a number.  :clocked is
+the heading's clocked minutes (including a running clock), :clocking is
+non-nil for the active clock when clock display is enabled, and :running is
+non-nil for the active clock regardless of display settings.  :remaining is
+the estimate left after clocked time, :over is the clocked time beyond the
+estimate, and :done is non-nil for a done keyword.  :sprint is the heading's
+sprint as a string (nil when unset), from the inherited `SPRINT' property or,
+when `simply-kanban-sprint-from-heading' is non-nil, the nearest ancestor
+heading.  :board is filled in only by `simply-kanban--collect-boards'.
 RESTRICT limits which entries become cards:
   nil          -- every TODO heading in the buffer;
   a marker     -- only TODO headings in that heading's subtree;
@@ -594,6 +604,7 @@ RESTRICT limits which entries become cards:
                                         (simply-kanban--story-points)))
                            (clocked (and simply-kanban-show-clock
                                          (simply-kanban--clocked-minutes)))
+                           (running (simply-kanban--clocking-p))
                            (done (and kw (member kw org-done-keywords) t))
                            (remaining (and simply-kanban-show-clock
                                            simply-kanban-show-remaining
@@ -613,8 +624,8 @@ RESTRICT limits which entries become cards:
                                   :effort effort
                                   :points points
                                   :clocked clocked
-                                  :clocking (and simply-kanban-show-clock
-                                                 (simply-kanban--clocking-p))
+                                  :clocking (and simply-kanban-show-clock running)
+                                  :running running
                                   :remaining remaining
                                   :over over
                                   :done done
@@ -967,14 +978,14 @@ it already fits; otherwise it is cut to the limit with an ellipsis appended."
 (defun simply-kanban--format-card (task width)
   "Return card lines for TASK fitting WIDTH.
 A card shows its title prefixed by a priority cookie when one is set, then
-its metadata and, when the card has progress data, a progress bar.  By
-default the metadata is condensed onto one line listing the board and
-source-file markers when present, then effort, story points, clocked time,
-remaining or over-budget time, sprint, and tags, omitting values the card
-lacks.  Numeric values are unlabelled and separated by spaces; durations use
-colon-separated units and the sprint value appears without a label.  With
-`simply-kanban--compact-cards' nil each value gets its own labelled line
-instead.  The title is truncated to
+its metadata and, when the card has progress data, a progress bar.  A running
+card's title is shown in uppercase.  By default the metadata is condensed onto
+one line listing the board and source-file markers when present, then effort,
+story points, clocked time, remaining or over-budget time, sprint, and tags,
+omitting values the card lacks.  Numeric values are unlabelled and separated
+by spaces; durations use colon-separated units and the sprint value appears
+without a label.  With `simply-kanban--compact-cards' nil each value gets its
+own labelled line instead.  The title is truncated to
 `simply-kanban--title-length' unless the card is expanded.  When the card is
 expanded (see `simply-kanban--expanded-cards') the full title is shown and
 the Org body follows below a divider."
@@ -985,7 +996,12 @@ the Org body follows below a divider."
          (prio-cookie (pcase prio (?A "[#A]") (?B "[#B]") (?C "[#C]") (_ nil)))
          (marker (plist-get task :marker))
          (expanded (simply-kanban--card-expanded-p marker))
-         (title (simply-kanban--truncate-title (or (plist-get task :title) "") expanded))
+         (running (plist-get task :running))
+         (title (simply-kanban--truncate-title
+                 (if running
+                     (upcase (or (plist-get task :title) ""))
+                   (or (plist-get task :title) ""))
+                 expanded))
          (title-text (if prio-cookie (concat prio-cookie " " title) title))
          (title-lines (simply-kanban--wrap title-text inner))
          (tags (plist-get task :tags))
@@ -2136,6 +2152,7 @@ outline first."
   (setq simply-kanban--running-overlays nil)
   (let ((card (simply-kanban--running-card-marker)))
     (setq simply-kanban--running-card card)
+    (setq simply-kanban--running-clock-state (simply-kanban--clock-state))
     (dolist (region (simply-kanban--card-regions card))
       (let ((beg (car region))
             (end (cdr region)))
@@ -2159,16 +2176,10 @@ outline first."
                 (push ov simply-kanban--running-overlays)))))))))
 
 (defun simply-kanban--sync-running-card ()
-  "Update the running-card highlight when the active clock changes."
-  (let ((pos (simply-kanban--active-clock-heading-position)))
-    (unless (if pos
-                (and simply-kanban--running-card
-                     (marker-buffer simply-kanban--running-card)
-                     (eq (marker-buffer org-clock-marker)
-                         (marker-buffer simply-kanban--running-card))
-                     (= pos (marker-position simply-kanban--running-card)))
-              (null simply-kanban--running-card))
-      (simply-kanban--highlight-running-card))))
+  "Refresh the board when the active clock changes."
+  (unless (equal (simply-kanban--clock-state)
+                 simply-kanban--running-clock-state)
+    (simply-kanban-refresh)))
 
 ;;; Mode
 
@@ -2296,7 +2307,6 @@ Used to build the board buffer name."
           "   "
           (:eval (propertize "{}" 'face 'help-key-binding)) " move  "
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
-          (:eval (propertize "c" 'face 'help-key-binding)) " compact  "
           (:eval (propertize "N" 'face 'help-key-binding)) " note  "
           (:eval (propertize "L" 'face 'help-key-binding)) " log  "
           (:eval (propertize "i/o" 'face 'help-key-binding)) " clock  "
