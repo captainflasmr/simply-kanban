@@ -920,8 +920,10 @@ BODY runs with `board' current."
       (cl-letf (((symbol-function 'org-clock-is-active) (lambda () t))
                 ((symbol-function 'org-clock-get-clocked-time) (lambda () 90)))
         (let ((line (sk-test--header-line-string)))
-          (should (string-prefix-p " [sprint: 2]  [clock: 1:30]  F follow"
-                                   line))
+          (should (string-prefix-p " [sprint: 2] [clock: 1:30] " line))
+          (should (string-match-p (regexp-quote "] ? menu") line))
+          (should-not (string-match-p "follow" line))
+          (should (string-match-p (regexp-quote "? menu") line))
           (should-not (string-match-p "SPC" line))
           (should-not (string-match-p "status" line))
           (should-not (string-match-p "quit" line)))))))

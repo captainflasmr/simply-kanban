@@ -2288,23 +2288,30 @@ Used to build the board buffer name."
   (setq header-line-format
         '(" "
           ;; Status indicators lead the header line so a narrow window
-          ;; never hides them behind the key reminders.
-          (:eval (if simply-kanban--sprint-filter
-                     (propertize (format "[sprint: %s]  " simply-kanban--sprint-filter)
-                                 'face 'warning)
-                   ""))
-          (:eval (when (org-clock-is-active)
-                   (propertize
-                    (format "[clock: %s]  "
-                            (org-duration-from-minutes
-                             (org-clock-get-clocked-time)))
-                    'face 'warning)))
-          (:eval (propertize "F" 'face 'help-key-binding)) " follow"
-          (:eval (if simply-kanban--follow "[ON]" ""))
-          (:eval (if simply-kanban--tag-filter
-                     (propertize (format "  [tag: %s]" simply-kanban--tag-filter) 'face 'success)
-                   ""))
-          "   "
+          ;; never hides them behind the key reminders.  They are joined
+          ;; with single spaces, and the whole group is followed by one.
+          (:eval
+           (let (parts)
+             (when simply-kanban--sprint-filter
+               (push (propertize
+                      (format "[sprint: %s]" simply-kanban--sprint-filter)
+                      'face 'warning)
+                     parts))
+             (when (org-clock-is-active)
+               (push (propertize
+                      (format "[clock: %s]"
+                              (org-duration-from-minutes
+                               (org-clock-get-clocked-time)))
+                      'face 'warning)
+                     parts))
+             (when simply-kanban--tag-filter
+               (push (propertize (format "[tag: %s]" simply-kanban--tag-filter)
+                                 'face 'success)
+                     parts))
+             (if parts
+                 (concat (mapconcat #'identity (nreverse parts) " ") " ")
+               "")))
+          (:eval (propertize "?" 'face 'help-key-binding)) " menu  "
           (:eval (propertize "{}" 'face 'help-key-binding)) " move  "
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
           (:eval (propertize "N" 'face 'help-key-binding)) " note  "
