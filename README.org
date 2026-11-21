@@ -158,7 +158,7 @@ Each row reports the sprint, task count, done count, story points, effort-weight
 
 * Clocking
 
-The board reads the source headings' Org clock entries, so time clocked anywhere in Org is visible on the cards.  Press =i= to clock in the card at point and =o= to clock out whichever task is running.  The active clock is shown in the header line, its card is highlighted with the =simply-kanban-running-card= face, and it displays =Clocked: 1:30 (run)=.  Started cards also show the time left, =Remaining: 1d 3h 42m=, calculated from the Effort estimate minus clocked time; a =DONE= card has zero remaining, and a card whose clocked time exceeds its estimate shows =Over: 30m= instead.  The day length in that format follows =org-duration-units= from the source Org buffer, so the project's 37-hour week renders one day as =7h24m= even when the board buffer itself is not visiting that file.
+The board reads the source headings' Org clock entries, so time clocked anywhere in Org is visible on the cards.  Press =i= to clock in the card at point and =o= to clock out whichever task is running.  The active clock is shown in the header line, the outline of its card is drawn with double-line box characters in the =simply-kanban-running-card= face, and it displays =Clocked: 1:30 (run)=.  Started cards also show the time left, =Remaining: 1d 3h 42m=, calculated from the Effort estimate minus clocked time; a =DONE= card has zero remaining, and a card whose clocked time exceeds its estimate shows =Over: 30m= instead.  The day length in that format follows =org-duration-units= from the source Org buffer, so the project's 37-hour week renders one day as =7h24m= even when the board buffer itself is not visiting that file.
 
 - =simply-kanban-show-clock= (default =t=) — show each card's clocked time and the active clock marker.
 - =simply-kanban-show-clock-total= (default =nil=) — append each column's summed clocked time in braces (={1:30}=) after its effort total.
@@ -218,7 +218,7 @@ Each card with progress data also carries its own bar, drawn with the same fille
 - =simply-kanban-all-boards= (default =t=) — in a multi-board file, offer an aggregate board (in the chooser and =B=) showing every board's cards at once, each card denoting its board.
 - =simply-kanban-all-boards-name= (default ="All Boards"=) — name of that aggregate entry.
 
-Faces: =simply-kanban-current-card= (focused card), =simply-kanban-running-card= (card with the running clock), =simply-kanban-tag= (card tags), =simply-kanban-effort= (effort badge and column total), =simply-kanban-points= (story-points badge and column total), =simply-kanban-clock= (clocked-time badge), =simply-kanban-remaining= (remaining-time badge), =simply-kanban-over= (over-budget badge), =simply-kanban-sprint= (sprint badge), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
+Faces: =simply-kanban-current-card= (focused card), =simply-kanban-running-card= (double-line outline of the card with the running clock), =simply-kanban-tag= (card tags), =simply-kanban-effort= (effort badge and column total), =simply-kanban-points= (story-points badge and column total), =simply-kanban-clock= (clocked-time badge), =simply-kanban-remaining= (remaining-time badge), =simply-kanban-over= (over-budget badge), =simply-kanban-sprint= (sprint badge), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
 
 * Kanban Feature Comparison Matrix
 

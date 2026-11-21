@@ -1012,7 +1012,7 @@ BODY runs with `board' current."
         (org-clock-out)))))
 
 (ert-deftest sk-test-highlight-running-card ()
-  "The card with the running clock is highlighted."
+  "The card with the running clock gets a double-line outline."
   (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n"
     (goto-char (point-min))
     (simply-kanban-next-card)
@@ -1026,6 +1026,36 @@ BODY runs with `board' current."
           (should (seq-every-p
                    (lambda (ov)
                      (eq (overlay-get ov 'face) 'simply-kanban-running-card))
+                   simply-kanban--running-overlays))
+          (should (seq-every-p
+                   (lambda (ov)
+                     (and (memq (char-after (overlay-start ov))
+                                '(?│ ?┌ ?├ ?└))
+                          (memq (char-before (overlay-end ov))
+                                '(?│ ?┐ ?┤ ?┘))))
+                   simply-kanban--running-overlays))
+          (should (seq-every-p
+                   (lambda (ov)
+                     (let ((outline (substring-no-properties
+                                     (overlay-get ov 'display))))
+                       (and (stringp outline)
+                            (= (string-width outline)
+                               (- (overlay-end ov) (overlay-start ov)))
+                            (seq-every-p
+                             (lambda (ch)
+                               (memq ch '(?╔ ?═ ?╗ ?║ ?╚ ?╝ ?╠ ?╣)))
+                             (string-to-list outline)))))
+                   simply-kanban--running-overlays))
+          (should (seq-some
+                   (lambda (ov)
+                     (string-match-p
+                      "╔.*╗" (substring-no-properties
+                              (overlay-get ov 'display))))
+                   simply-kanban--running-overlays))
+          (should (seq-some
+                   (lambda (ov)
+                     (string= "║" (substring-no-properties
+                                   (overlay-get ov 'display))))
                    simply-kanban--running-overlays))
           (simply-kanban-clock-out)
           (should-not simply-kanban--running-card)

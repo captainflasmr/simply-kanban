@@ -293,8 +293,8 @@ Offered in the board chooser when `simply-kanban-all-boards' is non-nil."
   :group 'simply-kanban)
 
 (defface simply-kanban-running-card
-  '((t :inherit highlight))
-  "Face highlighting the card whose Org clock is running."
+  '((t :inherit success :weight bold))
+  "Face accenting the double-line outline of the card whose Org clock runs."
   :group 'simply-kanban)
 
 (defface simply-kanban-tag
@@ -380,7 +380,14 @@ new files.")
   "The marker identifying the card with the running clock.")
 
 (defvar-local simply-kanban--running-overlays nil
-  "Overlays highlighting the card with the running clock.")
+  "Overlays drawing the double-line outline of the running card.")
+
+(defconst simply-kanban--running-outline-chars
+  '((?┌ . ?╔) (?─ . ?═) (?┐ . ?╗)
+    (?│ . ?║)
+    (?└ . ?╚) (?┘ . ?╝)
+    (?├ . ?╠) (?┤ . ?╣))
+  "Single-line box characters and their double-line replacements.")
 
 (defvar-local simply-kanban--tag-filter nil
   "When non-nil, only show cards carrying this tag.")
@@ -2113,17 +2120,43 @@ share the same `simply-kanban-marker' text property."
                          marker)))
                 (simply-kanban--anchors)))))
 
+(defun simply-kanban--double-outline (text)
+  "Return TEXT with single-line box characters replaced by double-line ones."
+  (apply #'string
+         (mapcar (lambda (ch)
+                   (or (alist-get ch simply-kanban--running-outline-chars) ch))
+                 (string-to-list text))))
+
 (defun simply-kanban--highlight-running-card ()
-  "Highlight the card with the running clock, clearing any previous highlight."
+  "Draw the card with the running clock using a double-line outline.
+The whole top, bottom, and divider rules are replaced, while other lines
+contribute only their left and right border characters.  Clear any previous
+outline first."
   (mapc #'delete-overlay simply-kanban--running-overlays)
   (setq simply-kanban--running-overlays nil)
   (let ((card (simply-kanban--running-card-marker)))
     (setq simply-kanban--running-card card)
     (dolist (region (simply-kanban--card-regions card))
-      (let ((ov (make-overlay (car region) (cdr region))))
-        (overlay-put ov 'face 'simply-kanban-running-card)
-        (overlay-put ov 'priority 90)
-        (push ov simply-kanban--running-overlays)))))
+      (let ((beg (car region))
+            (end (cdr region)))
+        (when (< beg end)
+          (let ((pieces
+                 (if (memq (char-after beg) '(?┌ ?├ ?└))
+                     (list (cons beg end))
+                   (list (cons beg (1+ beg))
+                         (cons (1- end) end)))))
+            (dolist (piece pieces)
+              (let* ((pbeg (car piece))
+                     (pend (cdr piece))
+                     (outline (propertize
+                               (simply-kanban--double-outline
+                                (buffer-substring-no-properties pbeg pend))
+                               'face 'simply-kanban-running-card))
+                     (ov (make-overlay pbeg pend)))
+                (overlay-put ov 'face 'simply-kanban-running-card)
+                (overlay-put ov 'display outline)
+                (overlay-put ov 'priority 90)
+                (push ov simply-kanban--running-overlays)))))))))
 
 (defun simply-kanban--sync-running-card ()
   "Update the running-card highlight when the active clock changes."
