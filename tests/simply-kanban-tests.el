@@ -154,7 +154,7 @@
       (should (string= "Story" (plist-get task :parent))))))
 
 (ert-deftest sk-test-format-card-ticket-relations ()
-  "Tickets show their type, parent story, and child task count."
+  "Tickets show their type, parent story, and child count."
   (let* ((simply-kanban--compact-cards nil)
          (story (simply-kanban--format-card
                  (list :keyword "TODO" :title "Epic" :type 'story
@@ -165,7 +165,7 @@
                       :parent "Epic")
                 60)))
     (should (cl-some (lambda (l) (string-match-p "STORY" l)) story))
-    (should (cl-some (lambda (l) (string-match-p "parent of 3 tasks (1 done)" l))
+    (should (cl-some (lambda (l) (string-match-p "parent of 3 children (1 done)" l))
                      story))
     (should (cl-some (lambda (l) (string-match-p "TASK" l)) task))
     (should (cl-some (lambda (l) (string-match-p "child of Epic" l)) task)))
@@ -174,7 +174,7 @@
                 (list :keyword "TODO" :title "MM-2 Leaf" :type 'task
                       :parent "Some other story" :parent-jira "MM-1")
                 60)))
-    (should (cl-some (lambda (l) (string-match-p "TASK (MM-1)" l)) task))))
+    (should (cl-some (lambda (l) (string-match-p "TASK parent MM-1" l)) task))))
 
 (ert-deftest sk-test-ticket-relations-hidden ()
   "`simply-kanban-show-ticket-types' hides the relationship line."
@@ -832,8 +832,8 @@ BODY runs with `board' current."
                                 "* TODO MM-100 Epic\n"
                                 ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
                                 "** TODO MM-101 Child task\n")
-      (should (string-match-p "STORY 1 task" (buffer-string)))
-      (should (string-match-p "TASK (MM-100)" (buffer-string)))
+      (should (string-match-p "STORY 1 child" (buffer-string)))
+      (should (string-match-p "TASK parent MM-100" (buffer-string)))
       (should (string-match-p "╔" (buffer-string)))
       (should (string-match-p "╗" (buffer-string)))
       (should (string-match-p "║" (buffer-string)))
@@ -847,7 +847,7 @@ BODY runs with `board' current."
                               ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
                               "** TODO MM-101 Task\n")
     (should-not (string-match-p "STORY" (buffer-string)))
-    (should (string-match-p "TASK (MM-100)" (buffer-string)))))
+    (should (string-match-p "TASK parent MM-100" (buffer-string)))))
 
 (ert-deftest sk-test-toggle-stories ()
   "The stories toggle shows and hides story cards on the board."
@@ -858,13 +858,13 @@ BODY runs with `board' current."
     (should-not (string-match-p "STORY" (buffer-string)))
     (simply-kanban-toggle-stories)
     (should simply-kanban--show-stories)
-    (should (string-match-p "STORY 1 task" (buffer-string)))
+    (should (string-match-p "STORY 1 child" (buffer-string)))
     (simply-kanban-toggle-stories)
     (should-not simply-kanban--show-stories)
     (should-not (string-match-p "STORY" (buffer-string)))))
 
-(ert-deftest sk-test-expanded-story-lists-tasks ()
-  "Expanding a story lists all of its child tasks."
+(ert-deftest sk-test-expanded-story-lists-children ()
+  "Expanding a story lists all of its children."
   (let ((simply-kanban--show-stories t))
     (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
                                 "* TODO MM-100 Story\n"
@@ -876,7 +876,7 @@ BODY runs with `board' current."
       (should-not (string-match-p (regexp-quote "- TODO MM-101")
                                   (buffer-string)))
       (simply-kanban-toggle-expand)
-      (should (string-match-p "Tasks" (buffer-string)))
+      (should (string-match-p "Children" (buffer-string)))
       (should (string-match-p (regexp-quote "- TODO MM-101 Child one")
                               (buffer-string)))
       (should (string-match-p (regexp-quote "- DONE MM-102 Child two")
@@ -901,7 +901,7 @@ BODY runs with `board' current."
             (setq board (simply-kanban--open (cons 'buffer src)))
             (with-current-buffer board
               (should simply-kanban--show-stories)
-              (should (string-match-p "STORY 1 task" (buffer-string)))))
+              (should (string-match-p "STORY 1 child" (buffer-string)))))
         (when (buffer-live-p board)
           (kill-buffer board))))))
 
@@ -1110,6 +1110,8 @@ BODY runs with `board' current."
   "The board keymap binds the core commands, aligned with simply-annotate."
   (should (keymapp simply-kanban-mode-map))
   (should (eq (lookup-key simply-kanban-mode-map (kbd "RET")) 'simply-kanban-goto))
+  (should (eq (lookup-key simply-kanban-mode-map (kbd "C-m")) 'simply-kanban-goto))
+  (should (equal (interactive-form 'simply-kanban-goto) '(interactive "P")))
   (should (eq (lookup-key simply-kanban-mode-map "}") 'simply-kanban-advance))
   (should (eq (lookup-key simply-kanban-mode-map "{") 'simply-kanban-retreat))
   (should (eq (lookup-key simply-kanban-mode-map "s") 'simply-kanban-set-status))

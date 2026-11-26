@@ -52,6 +52,7 @@
 ;;   {              send card back a stage
 ;;   s              set status (choose any stage)
 ;;   RET            reveal the heading (focus stays on the board)
+;;   C-u RET        jump to the heading in its Org file
 ;;   k              delete the heading (with confirmation)
 ;;   t              filter board by tag
 ;;   T              clear tag filter
@@ -226,8 +227,8 @@ portion uses the `shadow' face."
   "When non-nil, show ticket types and hierarchy on each card.
 A TODO heading with TODO descendants is a STORY; leaf TODO headings are
 TASKs.  A childless heading with a `TICKET_TYPE' property of `STORY' is also
-a STORY.  Cards show their type, a task's parent story, and a story's child
-task count.  Set this to nil to omit the extra relationship line."
+a STORY.  Cards show their type, their parent when they have one, and a
+story's child count.  Set this to nil to omit the extra relationship line."
   :type 'boolean
   :group 'simply-kanban)
 
@@ -434,7 +435,7 @@ A card's sprint is its `SPRINT' property, or an ancestor heading when
 `simply-kanban-default-sprint' when a board is opened.")
 
 (defvar-local simply-kanban--expanded-cards nil
-  "Markers of cards whose Org body and story task list are shown on the board.")
+  "Markers of cards whose Org body and story children are shown on the board.")
 
 (defvar-local simply-kanban--logbook-cards nil
   "Markers of cards whose LOGBOOK drawer is currently shown on the board.")
@@ -1102,7 +1103,7 @@ it already fits; otherwise it is cut to the limit with an ellipsis appended."
 (defun simply-kanban--ticket-relation-line (task)
   "Return a propertized type and hierarchy line for TASK, or nil.
 The line names the card's STORY or TASK type, its parent story when it has
-one, and the number of child tasks when it is a story.  Controlled by
+one, and the number of children when it is a story.  Controlled by
 `simply-kanban-show-ticket-types'."
   (when simply-kanban-show-ticket-types
     (let* ((type (plist-get task :type))
@@ -1122,12 +1123,11 @@ one, and the number of child tasks when it is a story.  Controlled by
                      (if simply-kanban--compact-cards
                          (let ((key (plist-get task :parent-jira)))
                            (concat
-                            (propertize "(" 'face 'shadow)
+                            (propertize "parent " 'face 'shadow)
                             (if key
                                 (simply-kanban--bold-jira-number key)
                               (propertize (simply-kanban--short-title parent)
-                                          'face 'shadow))
-                            (propertize ")" 'face 'shadow)))
+                                          'face 'shadow))))
                        (let ((text (concat "child of " parent)))
                          (add-face-text-property 0 (length text)
                                                  'shadow nil text)
@@ -1136,12 +1136,13 @@ one, and the number of child tasks when it is a story.  Controlled by
                      (propertize
                       (if simply-kanban--compact-cards
                           (if (> done 0)
-                              (format "%d task%s (%d done)"
-                                      children (if (= children 1) "" "s") done)
-                            (format "%d task%s"
-                                    children (if (= children 1) "" "s")))
-                        (format "parent of %d task%s (%d done)"
-                                children (if (= children 1) "" "s") done))
+                              (format "%d child%s (%d done)"
+                                      children (if (= children 1) "" "ren")
+                                      done)
+                            (format "%d child%s"
+                                    children (if (= children 1) "" "ren")))
+                        (format "parent of %d child%s (%d done)"
+                                children (if (= children 1) "" "ren") done))
                       'face 'shadow)))))
            (separator
             (if simply-kanban--compact-cards
@@ -1155,7 +1156,7 @@ one, and the number of child tasks when it is a story.  Controlled by
 A card shows its title prefixed by a priority cookie when one is set, then
 its metadata and, when the card has progress data, a progress bar.  A
 type/hierarchy line shows whether the card is a STORY or TASK, its parent
-story, and its child task count when
+story, and its child count when
 `simply-kanban-show-ticket-types' is non-nil.  By default the metadata is
 condensed onto one line listing the board and source-file markers when
 present, then effort, remaining or over-budget time, sprint, and tags,
@@ -1166,8 +1167,8 @@ line.  With `simply-kanban--compact-cards' nil each value gets its own
 labelled line instead.  The title is truncated to
 `simply-kanban--title-length' unless the card is expanded.  When the card is
 expanded (see `simply-kanban--expanded-cards') the full title is shown, the
-Org body follows below a divider, and an expanded STORY also lists its child
-tasks."
+Org body follows below a divider, and an expanded STORY also lists its
+children."
   (let* ((inner (max 1 (- width 4)))
          (keyword (plist-get task :keyword))
          (border-face (simply-kanban--keyword-face keyword))
@@ -1354,7 +1355,7 @@ tasks."
             (push (funcall box bl) lines)))))
     (when child-task-lines
       (push (funcall rule mid-left mid-right) lines)
-      (push (funcall box "Tasks") lines)
+      (push (funcall box "Children") lines)
       (dolist (line child-task-lines)
         (push (funcall box line) lines)))
     (when logbook
@@ -1660,11 +1661,12 @@ overlay, so it animates regardless of which window has focus."
     (let ((pulse-flag t))
       (pulse-momentary-highlight-one-line (point) 'simply-kanban-flash))))
 
-(defun simply-kanban-goto ()
-  "Reveal the Org heading for the card at point without leaving the board.
+(defun simply-kanban-goto (&optional select)
+  "Reveal the Org heading for the card at point.
 The heading's file is shown in another window and the heading line is briefly
-pulsed; focus stays in the board."
-  (interactive)
+pulsed.  Focus stays in the board unless SELECT is non-nil, in which case the
+heading's window is selected so point lands in the Org file."
+  (interactive "P")
   (let ((marker (simply-kanban--marker-at-point)))
     (if (not (and marker (marker-buffer marker)))
         (message "Point is not on a card")
@@ -1677,7 +1679,9 @@ pulsed; focus stays in the board."
             (cond ((fboundp 'org-fold-show-entry) (org-fold-show-entry))
                   ((fboundp 'org-show-entry) (org-show-entry)))
             (recenter)
-            (simply-kanban--flash-heading)))))))
+            (simply-kanban--flash-heading))
+          (when select
+            (select-window win)))))))
 
 (defun simply-kanban--maybe-save (buffer)
   "Save BUFFER if it visits a file and `simply-kanban-save-after-change' is set."
@@ -2278,7 +2282,7 @@ When enabled, navigating between cards also reveals the heading in its file."
 
 (defun simply-kanban-toggle-expand ()
   "Toggle showing the Org body of the card at point.
-For a STORY, expanding also lists its child tasks."
+For a STORY, expanding also lists its children."
   (interactive)
   (let ((marker (simply-kanban--marker-at-point)))
     (unless marker
@@ -2305,7 +2309,7 @@ For a STORY, expanding also lists its child tasks."
 
 (defun simply-kanban-toggle-expand-all ()
   "Expand the body of every card, or collapse them all if any are expanded.
-Expanded STORY cards also list their child tasks."
+Expanded STORY cards also list their children."
   (interactive)
   (unless (derived-mode-p 'simply-kanban-mode)
     (user-error "Not in a kanban board"))
@@ -2416,6 +2420,7 @@ highlight first."
     (define-key map (kbd "TAB") #'simply-kanban-next-column)
     (define-key map (kbd "<backtab>") #'simply-kanban-prev-column)
     (define-key map (kbd "RET") #'simply-kanban-goto)
+    (define-key map (kbd "C-m") #'simply-kanban-goto)
     (define-key map (kbd "}") #'simply-kanban-advance)
     (define-key map (kbd "{") #'simply-kanban-retreat)
     (define-key map (kbd "s") #'simply-kanban-set-status)

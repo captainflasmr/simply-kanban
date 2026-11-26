@@ -54,6 +54,7 @@ The board buffer's name identifies its source, the active sprint filter appears 
 | =}= / ={= | advance / retreat card a stage                       |
 | =s=       | set status (choose any stage)                        |
 | =RET=     | reveal the heading (focus stays on the board)        |
+| =C-u RET= / =C-u C-m= | jump to the heading in the Org file     |
 | =k=       | delete the heading (with confirmation)               |
 | =t=       | filter board by tag                                  |
 | =T=       | clear tag filter                                     |
@@ -80,7 +81,7 @@ The board buffer's name identifies its source, the active sprint filter appears 
 
 Press =SPC= (or =?=) for a =transient= menu grouping the commands (Move-Edit / Clock / Reveal / Board), modelled on the menu in [[https://github.com/captainflasmr/simply-annotate][simply-annotate]].
 
-The card at point is highlighted, and navigating moves the highlight onto the new card.
+The card at point is highlighted, and navigating moves the highlight onto the new card.  Use =C-u RET= (or =C-u C-m=) to jump to the heading and move focus to the Org file instead of keeping it on the board.
 
 To go the other way -- from a heading in the Org file to its card -- run =M-x simply-kanban-show-card= (bound to =C-c ;= in Org buffers) from the Org buffer.  It is the inverse of =RET=: it finds the heading at (or enclosing) point among the board's cards and selects that card, showing the board in another window while focus stays in the Org buffer.  The matched card is filled (face =simply-kanban-mark=) so you can see at a glance which card relates to the heading; that fill clears the moment you navigate to another card on the board.  If no board is open yet it creates one for the file first -- in a split to the right, so the original file stays visible on the left -- and the command always tries to take you to a card.  To jump straight to the card instead, leaving focus on the board, use =C-u C-c ;= or =M-x simply-kanban-jump-to-card=.
 
@@ -193,7 +194,7 @@ Ticket types are inferred from the Org hierarchy.  A TODO heading with TODO desc
 *** DOING MM-1479 Validate the example
 #+end_example
 
-A story is an ordinary TODO heading, so it has its own status, can be clocked, and moves independently of its child tasks.  Only TODO headings become cards, so give a story a TODO keyword (as in the example) when you want it on the board.  A non-TODO heading marked =TICKET_TYPE: STORY= still names the parent on its task cards, but is not itself a card; an unmarked grouping heading is just a container.  Story cards use a double-line outline in the =simply-kanban-story= face, while tasks use the normal single-line box.  Story cards are hidden by default; press =v= (=simply-kanban-toggle-stories=) or set =simply-kanban-show-stories= to show them.  Task cards keep their parent labels while stories are hidden, and the header line shows =[stories]= when stories are visible.  Jira numbers are shown in bold in card titles and hierarchy labels.  Cards carry a type/hierarchy line: compact cards use a short form (=STORY 3 tasks=, =TASK (MM-1472)=), while the detailed layout spells out =child of MM-1472 Scenario Specification= and =parent of 3 tasks (1 done)=.  Expanding a story with =e= lists all its child tasks under a =Tasks= divider, each with its TODO state, Jira key, and title.  Story cards also show the story's aggregated clocked time from Org's clock summary.
+A story is an ordinary TODO heading, so it has its own status, can be clocked, and moves independently of its child headings.  Only TODO headings become cards, so give a story a TODO keyword (as in the example) when you want it on the board.  A non-TODO heading marked =TICKET_TYPE: STORY= still names the parent on its child cards, but is not itself a card; an unmarked grouping heading is just a container.  Story cards use a double-line outline in the =simply-kanban-story= face, while tasks use the normal single-line box.  Story cards are hidden by default; press =v= (=simply-kanban-toggle-stories=) or set =simply-kanban-show-stories= to show them.  Task cards keep their parent labels while stories are hidden, and the header line shows =[stories]= when stories are visible.  Jira numbers are shown in bold in card titles and hierarchy labels.  Cards carry a type/hierarchy line: compact cards use a short form (=STORY 3 children=, =TASK parent MM-1472=), while the detailed layout spells out =child of MM-1472 Scenario Specification= and =parent of 3 children (1 done)=.  Expanding a story with =e= lists all its children under a =Children= divider, each with its TODO state, Jira key, and title.  Story cards also show the story's aggregated clocked time from Org's clock summary.
 
 - =simply-kanban-show-ticket-types= (default =t=) — show the type and hierarchy line on cards; set it to =nil= to hide it.
 - =simply-kanban-show-stories= (default =nil=) — show STORY cards on boards; when nil only TASK cards appear, though tasks still name their parent story.
@@ -229,7 +230,7 @@ Each card with progress data also carries its own bar, drawn with the same fille
 - =simply-kanban-show-over-total= (default =nil=) — append each column's summed over-budget time after an exclamation mark (=!30m=).
 - =simply-kanban-show-column-progress= (default =t=) — replace each column divider with a progress bar showing the completed share of its estimated effort.
 - =simply-kanban-show-card-progress= (default =t=) — show a progress bar inside each card, filled by its clocked time against its =Effort= estimate (=DONE= cards are fully filled).
-- =simply-kanban-show-ticket-types= (default =t=) — show each card's STORY/TASK type and its parent story or child task count.
+- =simply-kanban-show-ticket-types= (default =t=) — show each card's STORY/TASK type and its parent story or child count.
 - =simply-kanban-show-stories= (default =nil=) — show STORY cards on boards; when nil only TASK cards appear, though tasks still name their parent story.  Toggle the current board with =v=.
 - =simply-kanban-jira-number-regexp= — regexp matching a Jira key at the start of a title; the default accepts keys such as =MM-1472=.
 - =simply-kanban-default-sprint= (default =nil=) — sprint text a board filters to when first opened; =nil= shows all sprints.  Change the displayed sprint live with =S=.
