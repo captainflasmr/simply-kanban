@@ -117,10 +117,10 @@ verbose."
 
 (defcustom simply-kanban-compact-cards t
   "When non-nil, condense each card's metadata onto a single line.
-The line lists the board and source-file markers when present, then effort,
+The line lists the board and source-file markers when present, then
 remaining (or over-budget) time, sprint value, and tags, omitting values the
-card does not have.  Story points and clocked time are omitted from this
-line and appear in the detailed layout instead.  Numeric values carry no
+card does not have.  Story points, effort, and clocked time are omitted from
+this line and appear in the detailed layout instead.  Numeric values carry no
 labels; their order and face identify them.  Durations use colon-separated
 units (for example 1d:1h:23m), the sprint value appears without a label, and
 the line is truncated with an ellipsis when it does not fit.  The title and
@@ -151,8 +151,9 @@ open at once."
 (defcustom simply-kanban-show-effort t
   "When non-nil, show each card's Org effort estimate and a per-column total.
 The estimate is read from the card heading's `Effort' property (the value
-Org's \\[org-set-effort] sets); cards without one show nothing.  The column
-header then appends the summed effort of its cards in brackets."
+Org's \\[org-set-effort] sets); cards without one show nothing.  The detailed
+card layout shows it as an `Effort: N' badge; compact cards omit it.  The
+column header always appends the summed effort of its cards in brackets."
   :type 'boolean
   :group 'simply-kanban)
 
@@ -1185,12 +1186,12 @@ type/hierarchy line shows whether the card is a STORY or TASK, its parent
 story, and its child count when
 `simply-kanban-show-ticket-types' is non-nil.  By default the metadata is
 condensed onto one line listing the board and source-file markers when
-present, then effort, remaining or over-budget time, sprint, and tags,
-omitting values the card lacks.  Numeric values are unlabelled and separated
-by spaces; durations use colon-separated units and the sprint value appears
-without a label.  Story points and clocked time are omitted from the compact
-line.  With `simply-kanban--compact-cards' nil each value gets its own
-labelled line instead.  The title is truncated to
+present, then remaining or over-budget time, sprint, and tags, omitting
+values the card lacks.  Numeric values are unlabelled and separated by
+spaces; durations use colon-separated units and the sprint value appears
+without a label.  Story points, effort, and clocked time are omitted from the
+compact line.  With `simply-kanban--compact-cards' nil each value gets its
+own labelled line instead.  The title is truncated to
 `simply-kanban--title-length' unless the card is expanded.  When the card is
 expanded (see `simply-kanban--expanded-cards') the full title is shown, the
 Org body follows below a divider, and an expanded STORY also lists its
@@ -1262,8 +1263,6 @@ children."
          (effort-line (when effort-value
                         (propertize (concat "Effort: " effort-value)
                                     'face 'simply-kanban-effort)))
-         (effort-compact (when effort-value
-                           (propertize effort-value 'face 'simply-kanban-effort)))
          (points (and simply-kanban-show-story-points
                       (plist-get task :points)))
          (points-value (when points (simply-kanban--format-points points)))
@@ -1320,7 +1319,6 @@ children."
             (delq nil
                   (list board-line
                         file-line
-                        effort-compact
                         (or over-compact remaining-compact)
                         sprint-compact
                         tags-badge))))

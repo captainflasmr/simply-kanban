@@ -271,12 +271,13 @@
   "Compact cards place unlabelled metrics on a single line."
   (let ((lines (simply-kanban--format-card
                 (list :keyword "TODO" :title "x" :effort "2:00"
-                      :points 5 :clocked 60 :remaining 60)
+                      :points 5 :clocked 60 :remaining 90)
                 30)))
     (should (cl-some (lambda (l)
                        (string-match-p
-                        (regexp-quote "2:00 1h") l))
+                        (regexp-quote "1h:30m") l))
                      lines))
+    (should-not (cl-some (lambda (l) (string-match-p "2:00" l)) lines))
     (should-not (cl-some (lambda (l) (string-match-p " 5" l)) lines))
     (should-not (cl-some (lambda (l) (string-match-p "Effort:" l)) lines))
     (should-not (cl-some (lambda (l) (string-match-p "Points:" l)) lines))
@@ -320,7 +321,7 @@
                               "* TODO Alpha\n"
                               ":PROPERTIES:\n:Effort:   2:00\n:END:\n")
     (should simply-kanban--compact-cards)
-    (should (string-match-p "2:00" (buffer-string)))
+    (should-not (string-match-p "│ 2:00" (buffer-string)))
     (should-not (string-match-p "Effort:" (buffer-string)))
     (simply-kanban-toggle-compact)
     (should-not simply-kanban--compact-cards)
