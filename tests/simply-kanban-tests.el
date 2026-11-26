@@ -304,14 +304,13 @@
         (simply-kanban--multi-source t))
     (let* ((lines (simply-kanban--format-card
                    (list :keyword "TODO" :title "x" :tags '("backend")
-                         :sprint "Sprint 2" :board "Project Alpha"
+                         :sprint "2" :board "Project Alpha"
                          :file "tasks.org")
                    80))
            (meta (cl-find-if (lambda (l) (string-match-p ":backend:" l))
                              lines)))
       (should meta)
-      (should (string-match-p "Sprint 2" meta))
-      (should-not (string-match-p "Sprint:" meta))
+      (should (string-match-p "Sprint: 2" meta))
       (should (string-match-p "Project Alpha" meta))
       (should (string-match-p "tasks.org" meta)))))
 
@@ -537,9 +536,10 @@
     (simply-kanban-next-card)
     (simply-kanban-toggle-logbook)
     (should (string-match-p "Logbook" (buffer-string)))
-    (should (string-match-p "CLOCK:" (buffer-string)))
+    (should (string-match-p "2024-01-01 Mon 09:00" (buffer-string)))
+    (should-not (string-match-p "CLOCK:" (buffer-string)))
     (simply-kanban-toggle-logbook)
-    (should-not (string-match-p "CLOCK:" (buffer-string)))))
+    (should-not (string-match-p "Logbook" (buffer-string)))))
 
 (ert-deftest sk-test-add-note-setup ()
   "`simply-kanban-add-note' sets up an Org note for the card at point."
@@ -1192,6 +1192,7 @@ BODY runs with `board' current."
   (should (eq (lookup-key simply-kanban-mode-map "c") 'simply-kanban-toggle-compact))
   (should (eq (lookup-key simply-kanban-mode-map "v") 'simply-kanban-toggle-stories))
   (should (eq (lookup-key simply-kanban-mode-map "V") 'simply-kanban-toggle-tasks))
+  (should (eq (lookup-key simply-kanban-mode-map "l") 'simply-kanban-toggle-logbook))
   (should (eq (lookup-key simply-kanban-mode-map "j") 'simply-kanban-move-card-down))
   (should (eq (lookup-key simply-kanban-mode-map "k") 'simply-kanban-move-card-up))
   (should (eq (lookup-key simply-kanban-mode-map ";") 'simply-kanban-set-effort))
@@ -1201,6 +1202,8 @@ BODY runs with `board' current."
   (should (eq (lookup-key simply-kanban-mode-map "o") 'simply-kanban-clock-out))
   (should (eq (lookup-key simply-kanban-mode-map "S") 'simply-kanban-set-sprint-filter))
   (should (eq (lookup-key simply-kanban-mode-map "C") 'simply-kanban-clear-sprint-filter))
+  (should (eq (lookup-key simply-kanban-mode-map "a") 'simply-kanban-set-priority-filter))
+  (should (eq (lookup-key simply-kanban-mode-map "A") 'simply-kanban-clear-priority-filter))
   (should (eq (lookup-key simply-kanban-mode-map "n") 'simply-kanban-next-card)))
 
 (defun sk-test--header-line-string ()
@@ -1236,6 +1239,13 @@ BODY runs with `board' current."
           (should-not (string-match-p "SPC" line))
           (should-not (string-match-p "status" line))
           (should-not (string-match-p "quit" line)))))))
+
+(ert-deftest sk-test-header-line-priority-filter ()
+  "An active priority filter appears in the header line."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO [#B] Alpha\n"
+    (let ((simply-kanban--priority-filter "B"))
+      (should (string-match-p (regexp-quote "[priority: B]")
+                              (sk-test--header-line-string))))))
 
 (ert-deftest sk-test-mode-line-sprint-indicator ()
   "The sprint filter appears in the mode line, not the header line."
@@ -1433,6 +1443,44 @@ BODY runs with `board' current."
     (should (= 1 (length (simply-kanban--anchors))))
     (setq simply-kanban--tag-filter nil)
     (simply-kanban-refresh)
+    (should (= 2 (length (simply-kanban--anchors))))))
+
+(ert-deftest sk-test-priority-filter ()
+  "A priority filter shows only cards with that priority."
+  (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                              "* TODO [#A] Alpha\n"
+                              "* TODO [#B] Beta\n"
+                              "* TODO Gamma\n"
+                              "* TODO [#A] Delta\n")
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (should (= 4 (length (simply-kanban--anchors))))
+    (setq simply-kanban--priority-filter "A")
+    (simply-kanban-refresh)
+    (should (equal '("Alpha" "Delta") (sk-test--card-titles)))
+    (setq simply-kanban--priority-filter "none")
+    (simply-kanban-refresh)
+    (should (equal '("Gamma") (sk-test--card-titles)))
+    (setq simply-kanban--priority-filter nil)
+    (simply-kanban-refresh)
+    (should (= 4 (length (simply-kanban--anchors))))))
+
+(ert-deftest sk-test-set-priority-filter-command ()
+  "The priority filter prompt normalises input and clears on empty input."
+  (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                              "* TODO [#A] Alpha\n"
+                              "* TODO [#B] Beta\n")
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "a")))
+      (simply-kanban-set-priority-filter))
+    (should (equal "A" simply-kanban--priority-filter))
+    (should (equal '("Alpha") (sk-test--card-titles)))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "")))
+      (simply-kanban-set-priority-filter))
+    (should-not simply-kanban--priority-filter)
     (should (= 2 (length (simply-kanban--anchors))))))
 
 ;;; Sprints

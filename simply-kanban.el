@@ -59,6 +59,8 @@
 ;;   T              clear tag filter
 ;;   S              filter board by sprint (SPRINT property)
 ;;   C              clear sprint filter
+;;   a              filter board by priority (A, B, C, or none)
+;;   A              clear priority filter
 ;;   :              set the Org tags on the card at point
 ;;   ,              set the Org priority of the card at point
 ;;   ;              set the Org effort estimate on the card at point
@@ -68,9 +70,8 @@
 ;;   e              toggle the body of the card at point
 ;;   E              toggle the body of every card
 ;;   N              add a timestamped note to the card at point
-;;   L              toggle the card's LOGBOOK drawer
+;;   l              toggle the card's LOGBOOK drawer
 ;;   c              toggle compact (single-line metadata) cards
-;;   l              set the max card-title length (empty = no limit)
 ;;   F              toggle follow mode
 ;;   B              switch board (multi-board files only)
 ;;   g              refresh
@@ -123,9 +124,9 @@ remaining (or over-budget) time, sprint value, and tags, omitting values the
 card does not have.  Story points, effort, and clocked time are omitted from
 this line and appear in the detailed layout instead.  Numeric values carry no
 labels; their order and face identify them.  Durations use colon-separated
-units (for example 1d:1h:23m), the sprint value appears without a label, and
-the line is truncated with an ellipsis when it does not fit.  The title and
-progress bar keep their own lines.  Toggle the current board with
+units (for example 1d:1h:23m), the sprint value follows a `Sprint:' prefix,
+and the line is truncated with an ellipsis when it does not fit.  The title
+and progress bar keep their own lines.  Toggle the current board with
 \\[simply-kanban-toggle-compact]."
   :type 'boolean
   :group 'simply-kanban)
@@ -440,6 +441,11 @@ new files.")
 
 (defvar-local simply-kanban--tag-filter nil
   "When non-nil, only show cards carrying this tag.")
+
+(defvar-local simply-kanban--priority-filter nil
+  "When non-nil, only show cards with this Org priority.
+The value is a string: an uppercase priority letter such as \"A\", or
+\"none\" for cards without a priority.")
 
 (defvar-local simply-kanban--sprint-filter nil
   "When non-nil (a string), only show cards in that sprint.
@@ -1204,8 +1210,8 @@ story, and its child count when
 condensed onto one line listing the board and source-file markers when
 present, then remaining or over-budget time, sprint, and tags, omitting
 values the card lacks.  Numeric values are unlabelled and separated by
-spaces; durations use colon-separated units and the sprint value appears
-without a label.  Story points, effort, and clocked time are omitted from the
+spaces; durations use colon-separated units and the sprint value follows a
+`Sprint:' prefix.  Story points, effort, and clocked time are omitted from the
 compact line.  With `simply-kanban--compact-cards' nil each value gets its
 own labelled line instead.  The title is truncated to
 `simply-kanban--title-length' unless the card is expanded.  When the card is
@@ -1271,7 +1277,8 @@ children."
                          (propertize (format "Sprint: %s" sprint)
                                      'face 'simply-kanban-sprint)))
          (sprint-compact (when sprint
-                           (propertize sprint 'face 'simply-kanban-sprint)))
+                           (propertize (format "Sprint: %s" sprint)
+                                       'face 'simply-kanban-sprint)))
          (sprint-lines (when sprint-badge
                          (simply-kanban--wrap sprint-badge inner)))
          (effort (and simply-kanban-show-effort (plist-get task :effort)))
@@ -1401,11 +1408,12 @@ children."
     (when logbook
       (push (funcall rule mid-left mid-right) lines)
       (push (funcall box "Logbook") lines)
-      (dolist (raw (split-string logbook "\n"))
-        (if (string-empty-p raw)
-            (push (funcall box "") lines)
-          (dolist (ll (simply-kanban--wrap raw inner))
-            (push (funcall box ll) lines)))))
+      (dolist (line (split-string logbook "\n"))
+        (let ((raw (replace-regexp-in-string "\\`[ \t]*CLOCK:[ \t]*" "" line)))
+          (if (string-empty-p raw)
+              (push (funcall box "") lines)
+            (dolist (ll (simply-kanban--wrap raw inner))
+              (push (funcall box ll) lines))))))
     (push (funcall rule bottom-left bottom-right) lines)
     (nreverse lines)))
 
@@ -1417,6 +1425,11 @@ Lower numbers sort first: A=0, B=1, C=2, nil=3."
     (?B 1)
     (?C 2)
     (_ 3)))
+
+(defun simply-kanban--priority-label (priority)
+  "Return the filter label for Org priority PRIORITY.
+PRIORITY is a character such as ?A, or nil for an unprioritised card."
+  (if priority (char-to-string priority) "none"))
 
 (defun simply-kanban--marker-order (marker)
   "Return the manual board order stored on the heading at MARKER, or nil."
@@ -1572,6 +1585,14 @@ Must be called with the board buffer current and its window selected."
          (tasks (if simply-kanban--tag-filter
                     (cl-remove-if-not
                      (lambda (tk) (member simply-kanban--tag-filter (plist-get tk :tags)))
+                     tasks)
+                  tasks))
+         (tasks (if simply-kanban--priority-filter
+                    (cl-remove-if-not
+                     (lambda (tk)
+                       (equal simply-kanban--priority-filter
+                              (simply-kanban--priority-label
+                               (plist-get tk :priority))))
                      tasks)
                   tasks))
          (tasks (if simply-kanban--sprint-filter
@@ -2118,6 +2139,50 @@ same card once the note is stored or cancelled."
   (simply-kanban-refresh)
   (message "Cleared tag filter"))
 
+(defun simply-kanban--priority-filter-candidates (tasks)
+  "Return completion candidates for filtering TASKS by priority.
+The result lists the priorities present on the board in sort order, plus
+\"none\" when any card has no priority."
+  (let ((labels (delete-dups
+                 (mapcar (lambda (tk)
+                           (simply-kanban--priority-label
+                            (plist-get tk :priority)))
+                         tasks))))
+    (sort labels
+          (lambda (a b)
+            (cond
+             ((string= a "none") nil)
+             ((string= b "none") t)
+             (t (string< a b)))))))
+
+(defun simply-kanban-set-priority-filter ()
+  "Display only cards with a chosen Org priority.
+Offers the priorities present on the board plus `none' for cards without
+one.  Input is case-insensitive; empty input clears the filter."
+  (interactive)
+  (let* ((buffers (simply-kanban--spec-buffers simply-kanban--source-spec))
+         (tasks (simply-kanban--collect-all buffers))
+         (candidates (simply-kanban--priority-filter-candidates tasks))
+         (input (string-trim
+                 (completing-read "Show priority (empty = all): "
+                                  candidates nil nil))))
+    (setq simply-kanban--priority-filter
+          (unless (string-empty-p input)
+            (if (string= "none" (downcase input))
+                "none"
+              (upcase input))))
+    (simply-kanban-refresh)
+    (if simply-kanban--priority-filter
+        (message "Priority filter: %s" simply-kanban--priority-filter)
+      (message "Cleared priority filter"))))
+
+(defun simply-kanban-clear-priority-filter ()
+  "Clear the active priority filter."
+  (interactive)
+  (setq simply-kanban--priority-filter nil)
+  (simply-kanban-refresh)
+  (message "Cleared priority filter"))
+
 (defun simply-kanban--sprint-lessp (a b)
   "Return non-nil when sprint A should sort before sprint B.
 Whole-number sprints compare numerically; other values compare
@@ -2598,12 +2663,14 @@ highlight first."
     (define-key map (kbd "T") #'simply-kanban-clear-tag-filter)
     (define-key map (kbd "S") #'simply-kanban-set-sprint-filter)
     (define-key map (kbd "C") #'simply-kanban-clear-sprint-filter)
+    (define-key map (kbd "a") #'simply-kanban-set-priority-filter)
+    (define-key map (kbd "A") #'simply-kanban-clear-priority-filter)
     (define-key map (kbd ":") #'simply-kanban-set-tags)
     (define-key map (kbd ",") #'simply-kanban-set-priority)
     (define-key map (kbd ";") #'simply-kanban-set-effort)
     (define-key map (kbd "P") #'simply-kanban-set-story-points)
     (define-key map (kbd "N") #'simply-kanban-add-note)
-    (define-key map (kbd "L") #'simply-kanban-toggle-logbook)
+    (define-key map (kbd "l") #'simply-kanban-toggle-logbook)
     (define-key map (kbd "c") #'simply-kanban-toggle-compact)
     (define-key map (kbd "v") #'simply-kanban-toggle-stories)
     (define-key map (kbd "V") #'simply-kanban-toggle-tasks)
@@ -2614,7 +2681,6 @@ highlight first."
     (define-key map (kbd "e") #'simply-kanban-toggle-expand)
     (define-key map (kbd "E") #'simply-kanban-toggle-expand-all)
     (define-key map (kbd "B") #'simply-kanban-switch-board)
-    (define-key map (kbd "l") #'simply-kanban-set-title-length)
     (define-key map (kbd "g") #'simply-kanban-refresh)
     (define-key map (kbd "SPC") #'simply-kanban-transient)
     (define-key map (kbd "?") #'simply-kanban-transient)
@@ -2710,6 +2776,11 @@ Used to build the board buffer name."
                (push (propertize (format "[tag: %s]" simply-kanban--tag-filter)
                                  'face 'success)
                      parts))
+             (when simply-kanban--priority-filter
+               (push (propertize
+                      (format "[priority: %s]" simply-kanban--priority-filter)
+                      'face 'success)
+                     parts))
              (when simply-kanban--show-stories
                (push (propertize "[stories]" 'face 'success) parts))
              (unless simply-kanban--show-tasks
@@ -2721,7 +2792,7 @@ Used to build the board buffer name."
           (:eval (propertize "{}" 'face 'help-key-binding)) " move  "
           (:eval (propertize "e/E" 'face 'help-key-binding)) " expand  "
           (:eval (propertize "N" 'face 'help-key-binding)) " note  "
-          (:eval (propertize "L" 'face 'help-key-binding)) " log  "
+          (:eval (propertize "l" 'face 'help-key-binding)) " log  "
           (:eval (propertize "i/o" 'face 'help-key-binding)) " clock  "
           (:eval (propertize "#" 'face 'help-key-binding)) " card sprint  "
           (:eval (propertize "S" 'face 'help-key-binding)) " sprint"))
@@ -2732,13 +2803,16 @@ Used to build the board buffer name."
 
 (defun simply-kanban--transient-description ()
   "Header string for the `simply-kanban' transient menu."
-  (format "Simply Kanban   source: %s%s%s"
+  (format "Simply Kanban   source: %s%s%s%s"
           (simply-kanban--header-source)
           (if simply-kanban--tag-filter
               (format "   tag: %s" simply-kanban--tag-filter)
             "")
           (if simply-kanban--sprint-filter
               (format "   sprint: %s" simply-kanban--sprint-filter)
+            "")
+          (if simply-kanban--priority-filter
+              (format "   priority: %s" simply-kanban--priority-filter)
             "")))
 
 ;;;###autoload (autoload 'simply-kanban-transient "simply-kanban" nil t)
@@ -2765,7 +2839,7 @@ Used to build the board buffer name."
     ("RET" "reveal heading" simply-kanban-goto)
     ("e" "expand card"      simply-kanban-toggle-expand :transient t)
     ("E" "expand all"       simply-kanban-toggle-expand-all :transient t)
-    ("L" "show logbook"     simply-kanban-toggle-logbook :transient t)
+    ("l" "show logbook"     simply-kanban-toggle-logbook :transient t)
     ("c" "compact cards"    simply-kanban-toggle-compact :transient t)
     ("v" "show stories"     simply-kanban-toggle-stories :transient t)
     ("V" "show tasks"       simply-kanban-toggle-tasks :transient t)
@@ -2775,8 +2849,9 @@ Used to build the board buffer name."
     ("T" "clear tag filter" simply-kanban-clear-tag-filter :transient t)
     ("S" "filter by sprint" simply-kanban-set-sprint-filter)
     ("C" "clear sprint filter" simply-kanban-clear-sprint-filter :transient t)
+    ("a" "filter by priority" simply-kanban-set-priority-filter)
+    ("A" "clear priority filter" simply-kanban-clear-priority-filter :transient t)
     ("B" "switch board"     simply-kanban-switch-board)
-    ("l" "title length"     simply-kanban-set-title-length)
     ("g" "refresh"          simply-kanban-refresh :transient t)
     ("q" "quit board"       quit-window)]])
 
@@ -2847,6 +2922,7 @@ Only available when the current board came from a multi-board file."
                 (pop-to-buffer existing)
               (setq simply-kanban--source-spec (cdr choice)
                     simply-kanban--tag-filter nil
+                    simply-kanban--priority-filter nil
                     simply-kanban--expanded-cards nil)
               (simply-kanban-refresh)
               (let ((name (simply-kanban--spec-buffer-name
