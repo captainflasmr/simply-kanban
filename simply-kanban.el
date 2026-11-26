@@ -236,9 +236,17 @@ extra relationship line."
 (defcustom simply-kanban-show-stories nil
   "When non-nil, show STORY cards on kanban boards.
 A STORY is a top-level TODO heading with TODO descendants, or a childless
-top-level heading with a `TICKET_TYPE' property of `STORY'.  When nil, only
-TASK cards are shown, but task cards still name their parent story.  Toggle
-the current board with \\[simply-kanban-toggle-stories]."
+top-level heading with a `TICKET_TYPE' property of `STORY'.  When nil, story
+cards are hidden; task cards remain unless `simply-kanban-show-tasks' is also
+nil.  Toggle the current board with \\[simply-kanban-toggle-stories]."
+  :type 'boolean
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-show-tasks t
+  "When non-nil, show TASK cards on kanban boards.
+When nil only STORY cards are shown, provided they are also enabled with
+`simply-kanban-show-stories'.  Toggle the current board with
+\\[simply-kanban-toggle-tasks]."
   :type 'boolean
   :group 'simply-kanban)
 
@@ -455,6 +463,11 @@ it live with \\[simply-kanban-toggle-compact].")
   "When non-nil, this board shows STORY cards.
 Initialised from `simply-kanban-show-stories' when the board opens; toggle
 it live with \\[simply-kanban-toggle-stories].")
+
+(defvar-local simply-kanban--show-tasks t
+  "When non-nil, this board shows TASK cards.
+Initialised from `simply-kanban-show-tasks' when the board opens; toggle it
+live with \\[simply-kanban-toggle-tasks].")
 
 (defvar simply-kanban--multi-source nil
   "Bound non-nil while rendering a board that spans more than one file.
@@ -1518,6 +1531,11 @@ Must be called with the board buffer current and its window selected."
                   (cl-remove-if (lambda (tk)
                                   (eq (plist-get tk :type) 'story))
                                 tasks)))
+         (tasks (if simply-kanban--show-tasks
+                    tasks
+                  (cl-remove-if (lambda (tk)
+                                  (eq (plist-get tk :type) 'task))
+                                tasks)))
          (keywords (simply-kanban--merge-keywords buffers))
          (width (simply-kanban--column-width (length keywords)))
          (gap (make-string simply-kanban-column-gap ?\s))
@@ -2075,6 +2093,15 @@ a card is expanded with \\[simply-kanban-toggle-expand]."
   (simply-kanban-refresh)
   (message "Stories %s" (if simply-kanban--show-stories "shown" "hidden")))
 
+(defun simply-kanban-toggle-tasks ()
+  "Toggle whether TASK cards are shown on this board."
+  (interactive)
+  (unless (derived-mode-p 'simply-kanban-mode)
+    (user-error "Not in a kanban board"))
+  (setq simply-kanban--show-tasks (not simply-kanban--show-tasks))
+  (simply-kanban-refresh)
+  (message "Tasks %s" (if simply-kanban--show-tasks "shown" "hidden")))
+
 (defun simply-kanban-delete ()
   "Delete the Org heading for the card at point."
   (interactive)
@@ -2450,6 +2477,7 @@ highlight first."
     (define-key map (kbd "L") #'simply-kanban-toggle-logbook)
     (define-key map (kbd "c") #'simply-kanban-toggle-compact)
     (define-key map (kbd "v") #'simply-kanban-toggle-stories)
+    (define-key map (kbd "V") #'simply-kanban-toggle-tasks)
     (define-key map (kbd "#") #'simply-kanban-set-sprint)
     (define-key map (kbd "i") #'simply-kanban-clock-in)
     (define-key map (kbd "o") #'simply-kanban-clock-out)
@@ -2555,6 +2583,8 @@ Used to build the board buffer name."
                      parts))
              (when simply-kanban--show-stories
                (push (propertize "[stories]" 'face 'success) parts))
+             (unless simply-kanban--show-tasks
+               (push (propertize "[tasks hidden]" 'face 'warning) parts))
              (if parts
                  (concat (mapconcat #'identity (nreverse parts) " ") " ")
                "")))
@@ -2607,6 +2637,7 @@ Used to build the board buffer name."
     ("L" "show logbook"     simply-kanban-toggle-logbook :transient t)
     ("c" "compact cards"    simply-kanban-toggle-compact :transient t)
     ("v" "show stories"     simply-kanban-toggle-stories :transient t)
+    ("V" "show tasks"       simply-kanban-toggle-tasks :transient t)
     ("F" "follow mode"      simply-kanban-toggle-follow :transient t)]
    ["Board"
     ("t" "filter by tag"    simply-kanban-set-tag-filter)
@@ -2635,7 +2666,8 @@ to the window."
                  (string-trim (format "%s" simply-kanban-default-sprint)))
             simply-kanban--title-length simply-kanban-max-title-length
             simply-kanban--compact-cards simply-kanban-compact-cards
-            simply-kanban--show-stories simply-kanban-show-stories))
+            simply-kanban--show-stories simply-kanban-show-stories
+            simply-kanban--show-tasks simply-kanban-show-tasks))
     (pop-to-buffer buffer)
     (simply-kanban--render spec)
     buffer))

@@ -72,6 +72,7 @@ The board buffer's name identifies its source, the active sprint filter appears 
 | =L=       | toggle the card's LOGBOOK drawer on the board         |
 | =c=       | toggle compact single-line card metadata             |
 | =v=       | show/hide STORY cards                                |
+| =V=       | show/hide TASK cards                                 |
 | =l=       | set the max card-title length (empty = no limit)     |
 | =F=       | toggle follow mode (show heading as you move)        |
 | =B=       | switch board (multi-board files only)                |
@@ -194,7 +195,7 @@ Ticket types are inferred from the Org hierarchy.  A top-level TODO heading with
 *** DOING MM-1479 Validate the example
 #+end_example
 
-A story is an ordinary top-level TODO heading, so it has its own status, can be clocked, and moves independently of its child headings.  Only TODO headings become cards, so give a story a TODO keyword (as in the example) when you want it on the board; a non-TODO heading is ignored by the board entirely.  Story cards use a double-line outline in the =simply-kanban-story= face, while tasks use the normal single-line box.  Story cards are hidden by default; press =v= (=simply-kanban-toggle-stories=) or set =simply-kanban-show-stories= to show them.  Task cards keep their parent labels while stories are hidden, and the header line shows =[stories]= when stories are visible.  Jira numbers are shown in bold in card titles and hierarchy labels.  Cards carry a type/hierarchy line: compact cards use a short form (=STORY 3 children=, =TASK parent MM-1472=), while the detailed layout spells out =child of MM-1472 Scenario Specification= and =parent of 3 children (1 done)=.  Expanding a story with =e= lists all its children under a =Children= divider, each with its TODO state, Jira key, and title.  Story cards also show the story's aggregated clocked time from Org's clock summary.
+A story is an ordinary top-level TODO heading, so it has its own status, can be clocked, and moves independently of its child headings.  Only TODO headings become cards, so give a story a TODO keyword (as in the example) when you want it on the board; a non-TODO heading is ignored by the board entirely.  Story cards use a double-line outline in the =simply-kanban-story= face, while tasks use the normal single-line box.  Story cards are hidden by default; press =v= (=simply-kanban-toggle-stories=) or set =simply-kanban-show-stories= to show them.  TASK cards can be hidden with =V= (=simply-kanban-toggle-tasks=); show stories and hide tasks to display only stories, and the header line then shows =[stories]= with =[tasks hidden]=.  Task cards keep their parent labels while stories are hidden.  Jira numbers are shown in bold in card titles and hierarchy labels.  Cards carry a type/hierarchy line: compact cards use a short form (=STORY 3 children=, =TASK parent MM-1472=), while the detailed layout spells out =child of MM-1472 Scenario Specification= and =parent of 3 children (1 done)=.  Expanding a story with =e= lists all its children under a =Children= divider, each with its TODO state, Jira key, and title.  Story cards also show the story's aggregated clocked time from Org's clock summary.
 
 - =simply-kanban-show-ticket-types= (default =t=) — show the type and hierarchy line on cards; set it to =nil= to hide it.
 - =simply-kanban-show-stories= (default =nil=) — show STORY cards on boards; when nil only TASK cards appear, though tasks still name their parent story.
@@ -231,7 +232,8 @@ Each card with progress data also carries its own bar, drawn with the same fille
 - =simply-kanban-show-column-progress= (default =t=) — replace each column divider with a progress bar showing the completed share of its estimated effort.
 - =simply-kanban-show-card-progress= (default =t=) — show a progress bar inside each card, filled by its clocked time against its =Effort= estimate (=DONE= cards are fully filled).
 - =simply-kanban-show-ticket-types= (default =t=) — show each card's STORY/TASK type and its parent story or child count.
-- =simply-kanban-show-stories= (default =nil=) — show STORY cards on boards; when nil only TASK cards appear, though tasks still name their parent story.  Toggle the current board with =v=.
+- =simply-kanban-show-stories= (default =nil=) — show STORY cards on boards; when nil stories are hidden.  Toggle the current board with =v=.
+- =simply-kanban-show-tasks= (default =t=) — show TASK cards on boards; set it to =nil= to show only stories when stories are enabled.  Toggle the current board with =V=.
 - =simply-kanban-jira-number-regexp= — regexp matching a Jira key at the start of a title; the default accepts keys such as =MM-1472=.
 - =simply-kanban-default-sprint= (default =nil=) — sprint text a board filters to when first opened; =nil= shows all sprints.  Change the displayed sprint live with =S=.
 - =simply-kanban-sprint-from-heading= (default =nil=) — when non-nil, derive a card's sprint from its nearest ancestor heading without a TODO keyword instead of requiring a =SPRINT= property.

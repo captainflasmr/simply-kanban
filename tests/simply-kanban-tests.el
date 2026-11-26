@@ -885,6 +885,23 @@ BODY runs with `board' current."
     (should-not simply-kanban--show-stories)
     (should-not (string-match-p "STORY" (buffer-string)))))
 
+(ert-deftest sk-test-toggle-tasks ()
+  "The tasks toggle can hide task cards while keeping stories."
+  (let ((simply-kanban--show-stories t))
+    (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                                "* TODO MM-100 Story\n"
+                                ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
+                                "** TODO MM-101 Task\n")
+      (should (string-match-p "STORY 1 child" (buffer-string)))
+      (should (string-match-p "TASK parent MM-100" (buffer-string)))
+      (simply-kanban-toggle-tasks)
+      (should-not simply-kanban--show-tasks)
+      (should (string-match-p "STORY 1 child" (buffer-string)))
+      (should-not (string-match-p "TASK parent MM-100" (buffer-string)))
+      (simply-kanban-toggle-tasks)
+      (should simply-kanban--show-tasks)
+      (should (string-match-p "TASK parent MM-100" (buffer-string))))))
+
 (ert-deftest sk-test-expanded-story-lists-children ()
   "Expanding a story lists all of its children."
   (let ((simply-kanban--show-stories t))
@@ -924,6 +941,27 @@ BODY runs with `board' current."
             (with-current-buffer board
               (should simply-kanban--show-stories)
               (should (string-match-p "STORY 1 child" (buffer-string)))))
+        (when (buffer-live-p board)
+          (kill-buffer board))))))
+
+(ert-deftest sk-test-tasks-option-on-open ()
+  "`simply-kanban-show-tasks' can hide tasks while showing stories."
+  (sk-test-with-org (concat "#+TODO: TODO | DONE\n\n"
+                            "* TODO MM-100 Story\n"
+                            ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
+                            "** TODO MM-101 Task\n")
+    (let ((simply-kanban-show-stories t)
+          (simply-kanban-show-tasks nil)
+          (simply-kanban-buffer-name "*sk-test-tasks-option*")
+          board)
+      (unwind-protect
+          (progn
+            (setq board (simply-kanban--open (cons 'buffer src)))
+            (with-current-buffer board
+              (should-not simply-kanban--show-tasks)
+              (should (string-match-p "STORY 1 child" (buffer-string)))
+              (should-not (string-match-p "TASK parent MM-100"
+                                          (buffer-string)))))
         (when (buffer-live-p board)
           (kill-buffer board))))))
 
@@ -1143,6 +1181,7 @@ BODY runs with `board' current."
   (should (eq (lookup-key simply-kanban-mode-map "F") 'simply-kanban-toggle-follow))
   (should (eq (lookup-key simply-kanban-mode-map "c") 'simply-kanban-toggle-compact))
   (should (eq (lookup-key simply-kanban-mode-map "v") 'simply-kanban-toggle-stories))
+  (should (eq (lookup-key simply-kanban-mode-map "V") 'simply-kanban-toggle-tasks))
   (should (eq (lookup-key simply-kanban-mode-map ";") 'simply-kanban-set-effort))
   (should (eq (lookup-key simply-kanban-mode-map "P") 'simply-kanban-set-story-points))
   (should (eq (lookup-key simply-kanban-mode-map "#") 'simply-kanban-set-sprint))
