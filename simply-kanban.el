@@ -121,12 +121,13 @@ verbose."
   "When non-nil, condense each card's metadata onto a single line.
 The line lists the board and source-file markers when present, then
 remaining (or over-budget) time, sprint value, and tags, omitting values the
-card does not have.  Story points, effort, and clocked time are omitted from
-this line and appear in the detailed layout instead.  Numeric values carry no
-labels; their order and face identify them.  Durations use colon-separated
-units (for example 1d:1h:23m), the sprint value follows a `Sprint:' prefix,
-and the line is truncated with an ellipsis when it does not fit.  The title
-and progress bar keep their own lines.  Toggle the current board with
+card does not have.  Remaining time appears whenever the card has an effort
+estimate, even before any time is clocked.  Effort, story points, and clocked
+time are omitted from this line and appear in the detailed layout instead.
+Remaining values are unlabelled; the sprint value carries a `Sprint:' prefix.
+Durations use colon-separated units (for example 1d:1h:23m), and the line is
+truncated with an ellipsis when it does not fit.  The title and progress bar
+keep their own lines.  Toggle the current board with
 \\[simply-kanban-toggle-compact]."
   :type 'boolean
   :group 'simply-kanban)
@@ -156,8 +157,9 @@ without it sort by priority (A > B > C > none), then by source position."
   "When non-nil, show each card's Org effort estimate and a per-column total.
 The estimate is read from the card heading's `Effort' property (the value
 Org's \\[org-set-effort] sets); cards without one show nothing.  The detailed
-card layout shows it as an `Effort: N' badge; compact cards omit it.  The
-column header always appends the summed effort of its cards in brackets."
+card layout shows it as an `Effort: N' badge; compact cards show the remaining
+time instead.  The column header always appends the summed effort of its
+cards in brackets."
   :type 'boolean
   :group 'simply-kanban)
 
@@ -187,10 +189,10 @@ The total is shown in braces after the effort total, and requires
   :group 'simply-kanban)
 
 (defcustom simply-kanban-show-remaining t
-  "When non-nil, show the estimated time remaining on started cards.
-Remaining is the card's Effort minus its clocked time, floored at zero.
-Cards with no Effort or no clocked time show no remaining badge.  Requires
-`simply-kanban-show-clock' to be non-nil."
+  "When non-nil, show the estimated time remaining on cards with effort.
+Remaining is the card's Effort minus its clocked time, floored at zero.  Cards
+without an Effort show nothing; cards with no clock entries show the full
+estimate.  Clocked time is read when `simply-kanban-show-clock' is non-nil."
   :type 'boolean
   :group 'simply-kanban)
 
@@ -1209,11 +1211,13 @@ story, and its child count when
 `simply-kanban-show-ticket-types' is non-nil.  By default the metadata is
 condensed onto one line listing the board and source-file markers when
 present, then remaining or over-budget time, sprint, and tags, omitting
-values the card lacks.  Numeric values are unlabelled and separated by
-spaces; durations use colon-separated units and the sprint value follows a
-`Sprint:' prefix.  Story points, effort, and clocked time are omitted from the
-compact line.  With `simply-kanban--compact-cards' nil each value gets its
-own labelled line instead.  The title is truncated to
+values the card lacks.  Remaining time is shown for any card with an effort
+estimate, even when nothing has been clocked yet.  Remaining values are
+unlabelled; the sprint value carries a `Sprint:' prefix, and over-budget
+values are prefixed with `+'.  Durations use colon-separated units.  Effort,
+story points, and clocked time are omitted from the compact line.  With
+`simply-kanban--compact-cards' nil each value gets its own labelled line
+instead.  The title is truncated to
 `simply-kanban--title-length' unless the card is expanded.  When the card is
 expanded (see `simply-kanban--expanded-cards') the full title is shown, the
 Org body follows below a divider, and an expanded STORY also lists its
@@ -1315,8 +1319,7 @@ children."
          (remaining (and simply-kanban-show-remaining
                          (plist-get task :remaining)))
          (remaining-value (when (and remaining
-                                     (null over-value)
-                                     (or clocking (> (or clocked 0) 0)))
+                                     (null over-value))
                             (simply-kanban--format-jira-duration remaining)))
          (remaining-lines (when remaining-value
                             (simply-kanban--wrap
@@ -1325,7 +1328,8 @@ children."
                              inner)))
          (remaining-compact (when remaining-value
                               (propertize
-                               (simply-kanban--format-compact-duration remaining)
+                               (simply-kanban--format-compact-duration
+                                remaining)
                                'face 'simply-kanban-remaining)))
          (progress (and simply-kanban-show-card-progress
                         (simply-kanban--card-progress task)))

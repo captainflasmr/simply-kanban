@@ -268,7 +268,7 @@
     (should (string-suffix-p "…" line))))
 
 (ert-deftest sk-test-format-card-compact ()
-  "Compact cards place unlabelled metrics on a single line."
+  "Compact cards show unlabelled remaining time and omit detail badges."
   (let ((lines (simply-kanban--format-card
                 (list :keyword "TODO" :title "x" :effort "2:00"
                       :points 5 :clocked 60 :remaining 90)
@@ -277,13 +277,11 @@
                        (string-match-p
                         (regexp-quote "1h:30m") l))
                      lines))
-    (should-not (cl-some (lambda (l) (string-match-p "2:00" l)) lines))
-    (should-not (cl-some (lambda (l) (string-match-p " 5" l)) lines))
+    (should-not (cl-some (lambda (l) (string-match-p "Remaining:" l)) lines))
     (should-not (cl-some (lambda (l) (string-match-p "Effort:" l)) lines))
+    (should-not (cl-some (lambda (l) (string-match-p " 5" l)) lines))
     (should-not (cl-some (lambda (l) (string-match-p "Points:" l)) lines))
-    (should-not (cl-some (lambda (l) (string-match-p "Clocked:" l)) lines))
-    (should-not (cl-some (lambda (l) (string-match-p "Remaining:" l))
-                         lines))))
+    (should-not (cl-some (lambda (l) (string-match-p "Clocked:" l)) lines))))
 
 (ert-deftest sk-test-format-card-compact-durations ()
   "Compact cards render remaining time with colons but omit clocked time."
@@ -318,19 +316,25 @@
   "Cards start compact and `simply-kanban-toggle-compact' shows full badges."
   (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
                               "* TODO Alpha\n"
-                              ":PROPERTIES:\n:Effort:   2:00\n:END:\n")
+                              ":PROPERTIES:\n:Effort:   2:00\n"
+                              ":STORY_POINTS: 5\n:END:\n")
     (should simply-kanban--compact-cards)
-    (should-not (string-match-p "│ 2:00" (buffer-string)))
+    (should (string-match-p " 2h" (buffer-string)))
+    (should-not (string-match-p "Remaining:" (buffer-string)))
     (should-not (string-match-p "Effort:" (buffer-string)))
+    (should-not (string-match-p "Points:" (buffer-string)))
     (simply-kanban-toggle-compact)
     (should-not simply-kanban--compact-cards)
-    (should (string-match-p "Effort: 2:00" (buffer-string)))))
+    (should (string-match-p "Effort: 2:00" (buffer-string)))
+    (should (string-match-p "Remaining: 2h" (buffer-string)))
+    (should (string-match-p "Points: 5" (buffer-string)))))
 
 (ert-deftest sk-test-compact-cards-option-on-open ()
   "`simply-kanban-compact-cards' chooses the layout when a board opens."
   (sk-test-with-org (concat "#+TODO: TODO | DONE\n\n"
                             "* TODO Alpha\n"
-                            ":PROPERTIES:\n:Effort:   2:00\n:END:\n")
+                            ":PROPERTIES:\n:Effort:   2:00\n"
+                            ":STORY_POINTS: 5\n:END:\n")
     (dolist (option '(nil t))
       (let ((simply-kanban-compact-cards option)
             (simply-kanban-buffer-name "*sk-test-compact-option*")
@@ -340,8 +344,11 @@
               (setq board (simply-kanban--open (cons 'buffer src)))
               (with-current-buffer board
                 (should (eq option simply-kanban--compact-cards))
+                (should (string-match-p " 2h" (buffer-string)))
                 (should (eq (not option)
-                            (and (string-match-p "Effort:" (buffer-string)) t)))))
+                            (and (string-match-p "Remaining:" (buffer-string)) t)))
+                (should (eq (not option)
+                            (and (string-match-p "Points:" (buffer-string)) t)))))
           (when (buffer-live-p board)
             (kill-buffer board)))))))
 
@@ -707,7 +714,7 @@
         (kill-buffer board)))))
 
 (ert-deftest sk-test-format-card-shows-remaining ()
-  "A started card shows remaining time; an unstarted card does not."
+  "A card with an effort estimate shows remaining time, clocked or not."
   (let ((simply-kanban-show-remaining t)
         (simply-kanban--compact-cards nil))
     (let ((lines (simply-kanban--format-card
@@ -717,8 +724,8 @@
                        lines)))
     (let ((lines (simply-kanban--format-card
                   (list :keyword "TODO" :title "x" :remaining 60) 24)))
-      (should-not (cl-some (lambda (l) (string-match-p "Remaining:" l))
-                           lines))))
+      (should (cl-some (lambda (l) (string-match-p "Remaining: 1h" l))
+                       lines))))
   (let ((simply-kanban-show-remaining nil)
         (simply-kanban--compact-cards nil))
     (let ((lines (simply-kanban--format-card
