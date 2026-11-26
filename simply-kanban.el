@@ -117,8 +117,9 @@ verbose."
 (defcustom simply-kanban-compact-cards t
   "When non-nil, condense each card's metadata onto a single line.
 The line lists the board and source-file markers when present, then effort,
-story points, clocked time, remaining (or over-budget) time, sprint value,
-and tags, omitting values the card does not have.  Numeric values carry no
+remaining (or over-budget) time, sprint value, and tags, omitting values the
+card does not have.  Story points and clocked time are omitted from this
+line and appear in the detailed layout instead.  Numeric values carry no
 labels; their order and face identify them.  Durations use colon-separated
 units (for example 1d:1h:23m), the sprint value appears without a label, and
 the line is truncated with an ellipsis when it does not fit.  The title and
@@ -157,16 +158,18 @@ header then appends the summed effort of its cards in brackets."
 (defcustom simply-kanban-show-story-points t
   "When non-nil, show each card's story points and a per-column total.
 Story points are read from the card heading's `STORY_POINTS' property; cards
-without one show nothing.  The column header then appends the summed story
-points of its cards."
+without one show nothing.  The detailed card layout shows them as a
+`Points: N' badge, while compact cards omit the value; the column header
+always appends the summed story points of its cards."
   :type 'boolean
   :group 'simply-kanban)
 
 (defcustom simply-kanban-show-clock t
   "When non-nil, show each card's clocked time from its Org clock entries.
-A card shows a `Clocked: H:MM' badge when it has clocked time or a running
-clock.  The active clock is included while it runs, and is marked as
-`(run)'.  Set this to nil to omit clock data entirely."
+The detailed card layout shows a `Clocked: H:MM' badge when the card has
+clocked time or a running clock.  The active clock is included while it runs,
+and is marked as `(run)'.  Compact cards omit the clocked value but still show
+remaining or over-budget time.  Set this to nil to omit clock data entirely."
   :type 'boolean
   :group 'simply-kanban)
 
@@ -217,6 +220,32 @@ without an effort estimate, or without clocked time, show no bar unless they
 are DONE.  The filled portion uses the card's TODO-keyword face and the empty
 portion uses the `shadow' face."
   :type 'boolean
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-show-ticket-types t
+  "When non-nil, show ticket types and hierarchy on each card.
+A TODO heading with TODO descendants is a STORY; leaf TODO headings are
+TASKs.  A childless heading with a `TICKET_TYPE' property of `STORY' is also
+a STORY.  Cards show their type, a task's parent story, and a story's child
+task count.  Set this to nil to omit the extra relationship line."
+  :type 'boolean
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-show-stories nil
+  "When non-nil, show STORY cards on kanban boards.
+A STORY is a TODO heading with TODO descendants, or a childless heading with
+a `TICKET_TYPE' property of `STORY'.  When nil, only TASK cards are shown,
+but task cards still name their parent story.  Toggle the current board with
+\\[simply-kanban-toggle-stories]."
+  :type 'boolean
+  :group 'simply-kanban)
+
+(defcustom simply-kanban-jira-number-regexp
+  "\\`\\([A-Z][A-Z0-9]*-[0-9]+\\)\\b"
+  "Regexp matching a Jira issue number at the start of a card title.
+Group 1 is the issue key, for example MM-1472.  The default accepts an
+uppercase project prefix followed by a hyphen and digits."
+  :type 'regexp
   :group 'simply-kanban)
 
 (defcustom simply-kanban-default-sprint nil
@@ -292,9 +321,19 @@ Offered in the board chooser when `simply-kanban-all-boards' is non-nil."
   "Face used to highlight the card at point."
   :group 'simply-kanban)
 
-(defface simply-kanban-running-card
-  '((t :inherit success :weight bold))
-  "Face accenting the double-line outline of the card whose Org clock runs."
+(defface simply-kanban-story
+  '((t :inherit font-lock-type-face :weight bold))
+  "Face for STORY ticket labels and double-line outlines."
+  :group 'simply-kanban)
+
+(defface simply-kanban-task
+  '((t :inherit shadow))
+  "Face for the TASK ticket-type label shown on a card."
+  :group 'simply-kanban)
+
+(defface simply-kanban-jira
+  '((t :weight bold))
+  "Face for the Jira issue number shown on a card."
   :group 'simply-kanban)
 
 (defface simply-kanban-tag
@@ -383,14 +422,7 @@ new files.")
   "Last observed active clock, as (BUFFER . POSITION), or nil.")
 
 (defvar-local simply-kanban--running-overlays nil
-  "Overlays drawing the double-line outline of the running card.")
-
-(defconst simply-kanban--running-outline-chars
-  '((?┌ . ?╔) (?─ . ?═) (?┐ . ?╗)
-    (?│ . ?║)
-    (?└ . ?╚) (?┘ . ?╝)
-    (?├ . ?╠) (?┤ . ?╣))
-  "Single-line box characters and their double-line replacements.")
+  "Overlays drawing the running card's block outline.")
 
 (defvar-local simply-kanban--tag-filter nil
   "When non-nil, only show cards carrying this tag.")
@@ -402,7 +434,7 @@ A card's sprint is its `SPRINT' property, or an ancestor heading when
 `simply-kanban-default-sprint' when a board is opened.")
 
 (defvar-local simply-kanban--expanded-cards nil
-  "Markers of cards whose Org body is currently shown on the board.")
+  "Markers of cards whose Org body and story task list are shown on the board.")
 
 (defvar-local simply-kanban--logbook-cards nil
   "Markers of cards whose LOGBOOK drawer is currently shown on the board.")
@@ -416,6 +448,11 @@ it live with \\[simply-kanban-set-title-length].")
   "When non-nil, this board shows each card's metadata on a single line.
 Initialised from `simply-kanban-compact-cards' when the board opens; toggle
 it live with \\[simply-kanban-toggle-compact].")
+
+(defvar-local simply-kanban--show-stories nil
+  "When non-nil, this board shows STORY cards.
+Initialised from `simply-kanban-show-stories' when the board opens; toggle
+it live with \\[simply-kanban-toggle-stories].")
 
 (defvar simply-kanban--multi-source nil
   "Bound non-nil while rendering a board that spans more than one file.
@@ -570,16 +607,21 @@ The value includes the currently running clock interval, if any."
 
 (defun simply-kanban--collect-tasks (buffer &optional restrict)
   "Collect TODO entries from Org BUFFER as a list of card plists.
-Each plist has :keyword :title :body :logbook :priority :tags :effort :points
-:clocked :clocking :running :remaining :over :done :sprint :file :board
-:marker.  :points is the heading's `STORY_POINTS' as a number.  :clocked is
-the heading's clocked minutes (including a running clock), :clocking is
-non-nil for the active clock when clock display is enabled, and :running is
-non-nil for the active clock regardless of display settings.  :remaining is
-the estimate left after clocked time, :over is the clocked time beyond the
-estimate, and :done is non-nil for a done keyword.  :sprint is the heading's
-sprint as a string (nil when unset), from the inherited `SPRINT' property or,
-when `simply-kanban-sprint-from-heading' is non-nil, the nearest ancestor
+Each plist has :keyword :title :jira :body :logbook :priority :tags :effort
+:points :clocked :clocking :remaining :over :done :type :parent
+:parent-jira :children :children-done :child-tasks :sprint :file :board
+:marker.  :points is the heading's `STORY_POINTS' as a number.  :jira is the
+issue key parsed from the start of the title.  :clocked is the heading's
+clocked minutes (including a running clock), and :clocking is non-nil for the
+active clock when clock display is enabled.  :type is `story' or `task',
+:parent is the title of the nearest ancestor ticket heading, and :parent-jira
+is its parsed issue key.  :children and :children-done count the TODO
+descendants of a story, and :child-tasks lists them as plists with :keyword,
+:jira, :title, and :done.  :remaining is the estimate left after clocked
+time, :over is the clocked time beyond the estimate, and :done is non-nil for
+a done keyword.  :sprint is the heading's sprint as a string (nil when
+unset), from the inherited `SPRINT' property or, when
+`simply-kanban-sprint-from-heading' is non-nil, the nearest ancestor
 heading.  :board is filled in only by `simply-kanban--collect-boards'.
 RESTRICT limits which entries become cards:
   nil          -- every TODO heading in the buffer;
@@ -599,6 +641,9 @@ RESTRICT limits which entries become cards:
                              (or (not (eq restrict 'toplevel))
                                  (= (org-current-level) 1)))
                     (let* ((comps (org-heading-components))
+                           (title (substring-no-properties
+                                   (or (org-get-heading t t t t) "")))
+                           (jira (simply-kanban--jira-number title))
                            (effort (org-entry-get nil "Effort"))
                            (points (and simply-kanban-show-story-points
                                         (simply-kanban--story-points)))
@@ -613,10 +658,18 @@ RESTRICT limits which entries become cards:
                            (over (and simply-kanban-show-clock
                                       simply-kanban-show-remaining
                                       (simply-kanban--over-minutes
-                                       effort clocked))))
+                                       effort clocked)))
+                           (child-tasks (simply-kanban--subtree-todo-tasks))
+                           (children (length child-tasks))
+                           (children-done
+                            (seq-count (lambda (ct) (plist-get ct :done))
+                                       child-tasks))
+                           (parent (simply-kanban--ancestor-ticket-title))
+                           (parent-jira (simply-kanban--jira-number parent))
+                           (type (simply-kanban--ticket-type children)))
                       (push (list :keyword kw
-                                  :title (substring-no-properties
-                                          (or (org-get-heading t t t t) ""))
+                                  :title title
+                                  :jira jira
                                   :body (simply-kanban--entry-body)
                                   :logbook (simply-kanban--entry-logbook)
                                   :priority (nth 3 comps)
@@ -625,10 +678,15 @@ RESTRICT limits which entries become cards:
                                   :points points
                                   :clocked clocked
                                   :clocking (and simply-kanban-show-clock running)
-                                  :running running
                                   :remaining remaining
                                   :over over
                                   :done done
+                                  :type type
+                                  :parent parent
+                                  :parent-jira parent-jira
+                                  :children children
+                                  :children-done children-done
+                                  :child-tasks child-tasks
                                   :sprint (simply-kanban--read-sprint)
                                   :file file
                                   :board nil
@@ -652,6 +710,52 @@ RESTRICT limits which entries become cards:
             (goto-char (match-beginning 0))
             (when (org-get-todo-state) (throw 'found t))))
         nil))))
+
+(defun simply-kanban--subtree-todo-tasks ()
+  "Return TODO entries below the heading at point.
+Each entry is a plist with :keyword, :jira, :title, and :done."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((end (save-excursion (org-end-of-subtree t t)))
+          tasks)
+      (forward-line 1)
+      (while (re-search-forward org-heading-regexp end t)
+        (save-excursion
+          (goto-char (match-beginning 0))
+          (let ((kw (org-get-todo-state)))
+            (when kw
+              (let ((title (substring-no-properties
+                            (or (org-get-heading t t t t) ""))))
+                (push (list :keyword kw
+                            :jira (simply-kanban--jira-number title)
+                            :title title
+                            :done (and (member kw org-done-keywords) t))
+                      tasks))))))
+      (nreverse tasks))))
+
+(defun simply-kanban--ancestor-ticket-title ()
+  "Return the title of the nearest ancestor ticket heading, or nil.
+A ticket heading is a TODO heading or a heading whose `TICKET_TYPE'
+property is `STORY'."
+  (save-excursion
+    (catch 'found
+      (while (org-up-heading-safe)
+        (let ((type (org-entry-get nil "TICKET_TYPE")))
+          (when (or (org-get-todo-state)
+                    (and type (string= "story" (downcase type))))
+            (throw 'found
+                   (substring-no-properties (or (org-get-heading t t t t) ""))))))
+      nil)))
+
+(defun simply-kanban--ticket-type (children)
+  "Return `story' or `task' for the heading at point.
+A heading with CHILDREN TODO entries is a STORY.  A childless heading with a
+`TICKET_TYPE' property of `STORY' is also a STORY; everything else is a TASK."
+  (let ((prop (org-entry-get nil "TICKET_TYPE")))
+    (if (or (> (or children 0) 0)
+            (and prop (string= "story" (downcase prop))))
+        'story
+      'task)))
 
 (defun simply-kanban--scan-boards (buffer)
   "Return ((NAME . MARKER) ...) for the kanban boards defined in BUFFER.
@@ -975,35 +1079,141 @@ it already fits; otherwise it is cut to the limit with an ellipsis appended."
       text
     (concat (truncate-string-to-width text (max 0 (1- width))) "…")))
 
+(defun simply-kanban--short-title (title)
+  "Return the first token of TITLE, or TITLE when it has none."
+  (or (car (split-string title)) title))
+
+(defun simply-kanban--jira-number (title)
+  "Return the Jira issue number at the start of TITLE, or nil."
+  (when (and title
+             (string-match simply-kanban-jira-number-regexp title))
+    (or (match-string 1 title) (match-string 0 title))))
+
+(defun simply-kanban--bold-jira-number (text)
+  "Return a copy of TEXT with its Jira issue number in bold."
+  (let ((jira (simply-kanban--jira-number text)))
+    (if (and jira (string-match (regexp-quote jira) text))
+        (let ((text (copy-sequence text)))
+          (add-face-text-property (match-beginning 0) (match-end 0)
+                                  'simply-kanban-jira nil text)
+          text)
+      text)))
+
+(defun simply-kanban--ticket-relation-line (task)
+  "Return a propertized type and hierarchy line for TASK, or nil.
+The line names the card's STORY or TASK type, its parent story when it has
+one, and the number of child tasks when it is a story.  Controlled by
+`simply-kanban-show-ticket-types'."
+  (when simply-kanban-show-ticket-types
+    (let* ((type (plist-get task :type))
+           (parent (plist-get task :parent))
+           (children (plist-get task :children))
+           (done (or (plist-get task :children-done) 0))
+           (type-label
+            (pcase type
+              ('story (propertize "STORY" 'face 'simply-kanban-story))
+              ('task (propertize "TASK" 'face 'simply-kanban-task))
+              (_ nil)))
+           (parts
+            (delq nil
+                  (list
+                   type-label
+                   (when parent
+                     (if simply-kanban--compact-cards
+                         (let ((key (plist-get task :parent-jira)))
+                           (concat
+                            (propertize "(" 'face 'shadow)
+                            (if key
+                                (simply-kanban--bold-jira-number key)
+                              (propertize (simply-kanban--short-title parent)
+                                          'face 'shadow))
+                            (propertize ")" 'face 'shadow)))
+                       (let ((text (concat "child of " parent)))
+                         (add-face-text-property 0 (length text)
+                                                 'shadow nil text)
+                         (simply-kanban--bold-jira-number text))))
+                   (when (and children (> children 0))
+                     (propertize
+                      (if simply-kanban--compact-cards
+                          (if (> done 0)
+                              (format "%d task%s (%d done)"
+                                      children (if (= children 1) "" "s") done)
+                            (format "%d task%s"
+                                    children (if (= children 1) "" "s")))
+                        (format "parent of %d task%s (%d done)"
+                                children (if (= children 1) "" "s") done))
+                      'face 'shadow)))))
+           (separator
+            (if simply-kanban--compact-cards
+                " "
+              (propertize " · " 'face 'shadow))))
+      (when parts
+        (mapconcat #'identity parts separator)))))
+
 (defun simply-kanban--format-card (task width)
   "Return card lines for TASK fitting WIDTH.
 A card shows its title prefixed by a priority cookie when one is set, then
-its metadata and, when the card has progress data, a progress bar.  A running
-card's title is shown in uppercase.  By default the metadata is condensed onto
-one line listing the board and source-file markers when present, then effort,
-story points, clocked time, remaining or over-budget time, sprint, and tags,
+its metadata and, when the card has progress data, a progress bar.  A
+type/hierarchy line shows whether the card is a STORY or TASK, its parent
+story, and its child task count when
+`simply-kanban-show-ticket-types' is non-nil.  By default the metadata is
+condensed onto one line listing the board and source-file markers when
+present, then effort, remaining or over-budget time, sprint, and tags,
 omitting values the card lacks.  Numeric values are unlabelled and separated
 by spaces; durations use colon-separated units and the sprint value appears
-without a label.  With `simply-kanban--compact-cards' nil each value gets its
-own labelled line instead.  The title is truncated to
+without a label.  Story points and clocked time are omitted from the compact
+line.  With `simply-kanban--compact-cards' nil each value gets its own
+labelled line instead.  The title is truncated to
 `simply-kanban--title-length' unless the card is expanded.  When the card is
-expanded (see `simply-kanban--expanded-cards') the full title is shown and
-the Org body follows below a divider."
+expanded (see `simply-kanban--expanded-cards') the full title is shown, the
+Org body follows below a divider, and an expanded STORY also lists its child
+tasks."
   (let* ((inner (max 1 (- width 4)))
          (keyword (plist-get task :keyword))
          (border-face (simply-kanban--keyword-face keyword))
+         (story (eq (plist-get task :type) 'story))
+         (outline-face (if story 'simply-kanban-story border-face))
+         (vbar (if story "║" "│"))
+         (hbar (if story ?═ ?─))
+         (top-left (if story "╔" "┌"))
+         (top-right (if story "╗" "┐"))
+         (bottom-left (if story "╚" "└"))
+         (bottom-right (if story "╝" "┘"))
+         (mid-left (if story "╠" "├"))
+         (mid-right (if story "╣" "┤"))
          (prio (plist-get task :priority))
          (prio-cookie (pcase prio (?A "[#A]") (?B "[#B]") (?C "[#C]") (_ nil)))
          (marker (plist-get task :marker))
          (expanded (simply-kanban--card-expanded-p marker))
-         (running (plist-get task :running))
-         (title (simply-kanban--truncate-title
-                 (if running
-                     (upcase (or (plist-get task :title) ""))
-                   (or (plist-get task :title) ""))
-                 expanded))
+         (title (simply-kanban--bold-jira-number
+                 (simply-kanban--truncate-title
+                  (or (plist-get task :title) "")
+                  expanded)))
          (title-text (if prio-cookie (concat prio-cookie " " title) title))
          (title-lines (simply-kanban--wrap title-text inner))
+         (relations (simply-kanban--ticket-relation-line task))
+         (relation-lines
+          (when relations
+            (if simply-kanban--compact-cards
+                (list (simply-kanban--fit-line relations inner))
+              (simply-kanban--wrap relations inner))))
+         (child-tasks (and expanded
+                           (eq (plist-get task :type) 'story)
+                           (plist-get task :child-tasks)))
+         (child-task-lines
+          (when child-tasks
+            (seq-mapcat
+             (lambda (child)
+               (let* ((kw (plist-get child :keyword))
+                      (head (concat
+                             "- "
+                             (propertize kw 'face
+                                         (simply-kanban--keyword-face kw))
+                             " "))
+                      (title (simply-kanban--bold-jira-number
+                              (or (plist-get child :title) ""))))
+                 (simply-kanban--wrap (concat head title) inner)))
+             child-tasks)))
          (tags (plist-get task :tags))
          (tags-badge (when tags
                        (propertize (concat ":" (mapconcat #'identity tags ":") ":")
@@ -1033,8 +1243,6 @@ the Org body follows below a divider."
          (points-line (when points-value
                         (propertize (concat "Points: " points-value)
                                     'face 'simply-kanban-points)))
-         (points-compact (when points-value
-                           (propertize points-value 'face 'simply-kanban-points)))
          (clocked (and simply-kanban-show-clock (plist-get task :clocked)))
          (clocking (and simply-kanban-show-clock (plist-get task :clocking)))
          (clock-value (when (or clocking (> (or clocked 0) 0))
@@ -1043,12 +1251,6 @@ the Org body follows below a divider."
          (clock-line (when clock-value
                        (propertize (concat "Clocked: " clock-value)
                                    'face 'simply-kanban-clock)))
-         (clock-compact (when clock-value
-                          (propertize
-                           (concat (simply-kanban--format-compact-duration
-                                    (or clocked 0))
-                                   (when clocking " (run)"))
-                           'face 'simply-kanban-clock)))
          (over (and simply-kanban-show-remaining (plist-get task :over)))
          (over-value (when (and over (> over 0))
                        (simply-kanban--format-jira-duration over)))
@@ -1092,8 +1294,6 @@ the Org body follows below a divider."
                   (list board-line
                         file-line
                         effort-compact
-                        points-compact
-                        clock-compact
                         (or over-compact remaining-compact)
                         sprint-compact
                         tags-badge))))
@@ -1105,19 +1305,22 @@ the Org body follows below a divider."
          (logbook (and (simply-kanban--card-logbook-p marker)
                        (plist-get task :logbook)))
          (box (lambda (s)
-                (concat (propertize "│" 'face border-face)
+                (concat (propertize vbar 'face outline-face)
                         " "
                         (simply-kanban--pad s inner)
                         " "
-                        (propertize "│" 'face border-face))))
+                        (propertize vbar 'face outline-face))))
          (rule (lambda (l r)
-                 (concat (propertize l 'face border-face)
-                         (propertize (make-string (- width 2) ?─) 'face border-face)
-                         (propertize r 'face border-face))))
+                 (concat (propertize l 'face outline-face)
+                         (propertize (make-string (- width 2) hbar)
+                                     'face outline-face)
+                         (propertize r 'face outline-face))))
          lines)
-    (push (funcall rule "┌" "┐") lines)
+    (push (funcall rule top-left top-right) lines)
     (dolist (tl title-lines)
       (push (funcall box tl) lines))
+    (dolist (rline relation-lines)
+      (push (funcall box rline) lines))
     (if simply-kanban--compact-cards
         (when compact-line
           (push (funcall box compact-line) lines))
@@ -1143,21 +1346,26 @@ the Org body follows below a divider."
       (when file-line
         (push (funcall box file-line) lines)))
     (when body
-      (push (funcall rule "├" "┤") lines)
+      (push (funcall rule mid-left mid-right) lines)
       (dolist (raw (split-string body "\n"))
         (if (string-empty-p raw)
             (push (funcall box "") lines)
           (dolist (bl (simply-kanban--wrap raw inner))
             (push (funcall box bl) lines)))))
+    (when child-task-lines
+      (push (funcall rule mid-left mid-right) lines)
+      (push (funcall box "Tasks") lines)
+      (dolist (line child-task-lines)
+        (push (funcall box line) lines)))
     (when logbook
-      (push (funcall rule "├" "┤") lines)
+      (push (funcall rule mid-left mid-right) lines)
       (push (funcall box "Logbook") lines)
       (dolist (raw (split-string logbook "\n"))
         (if (string-empty-p raw)
             (push (funcall box "") lines)
           (dolist (ll (simply-kanban--wrap raw inner))
             (push (funcall box ll) lines)))))
-    (push (funcall rule "└" "┘") lines)
+    (push (funcall rule bottom-left bottom-right) lines)
     (nreverse lines)))
 
 (defun simply-kanban--priority-order (prio)
@@ -1291,6 +1499,11 @@ Must be called with the board buffer current and its window selected."
                                          (plist-get tk :sprint)))
                      tasks)
                   tasks))
+         (tasks (if simply-kanban--show-stories
+                    tasks
+                  (cl-remove-if (lambda (tk)
+                                  (eq (plist-get tk :type) 'story))
+                                tasks)))
          (keywords (simply-kanban--merge-keywords buffers))
          (width (simply-kanban--column-width (length keywords)))
          (gap (make-string simply-kanban-column-gap ?\s))
@@ -1789,6 +2002,7 @@ any text; empty input clears the filter and shows every sprint."
                  (completing-read "Show sprint (empty = all): " sprints nil nil))))
     (setq simply-kanban--sprint-filter (unless (string-empty-p input) input))
     (simply-kanban-refresh)
+    (force-mode-line-update)
     (if simply-kanban--sprint-filter
         (message "Sprint filter: %s" simply-kanban--sprint-filter)
       (message "Cleared sprint filter"))))
@@ -1798,6 +2012,7 @@ any text; empty input clears the filter and shows every sprint."
   (interactive)
   (setq simply-kanban--sprint-filter nil)
   (simply-kanban-refresh)
+  (force-mode-line-update)
   (message "Cleared sprint filter"))
 
 (defun simply-kanban-set-title-length ()
@@ -1833,6 +2048,15 @@ a card is expanded with \\[simply-kanban-toggle-expand]."
   (simply-kanban-refresh)
   (message "Compact cards %s"
            (if simply-kanban--compact-cards "enabled" "disabled")))
+
+(defun simply-kanban-toggle-stories ()
+  "Toggle whether STORY cards are shown on this board."
+  (interactive)
+  (unless (derived-mode-p 'simply-kanban-mode)
+    (user-error "Not in a kanban board"))
+  (setq simply-kanban--show-stories (not simply-kanban--show-stories))
+  (simply-kanban-refresh)
+  (message "Stories %s" (if simply-kanban--show-stories "shown" "hidden")))
 
 (defun simply-kanban-delete ()
   "Delete the Org heading for the card at point."
@@ -2053,7 +2277,8 @@ When enabled, navigating between cards also reveals the heading in its file."
   (when simply-kanban--follow (simply-kanban--follow-card)))
 
 (defun simply-kanban-toggle-expand ()
-  "Toggle showing the Org body of the card at point."
+  "Toggle showing the Org body of the card at point.
+For a STORY, expanding also lists its child tasks."
   (interactive)
   (let ((marker (simply-kanban--marker-at-point)))
     (unless marker
@@ -2079,7 +2304,8 @@ When enabled, navigating between cards also reveals the heading in its file."
     (simply-kanban-refresh)))
 
 (defun simply-kanban-toggle-expand-all ()
-  "Expand the body of every card, or collapse them all if any are expanded."
+  "Expand the body of every card, or collapse them all if any are expanded.
+Expanded STORY cards also list their child tasks."
   (interactive)
   (unless (derived-mode-p 'simply-kanban-mode)
     (user-error "Not in a kanban board"))
@@ -2136,44 +2362,42 @@ share the same `simply-kanban-marker' text property."
                          marker)))
                 (simply-kanban--anchors)))))
 
-(defun simply-kanban--double-outline (text)
-  "Return TEXT with single-line box characters replaced by double-line ones."
-  (apply #'string
-         (mapcar (lambda (ch)
-                   (or (alist-get ch simply-kanban--running-outline-chars) ch))
-                 (string-to-list text))))
+(defun simply-kanban--running-block-overlay (beg end face)
+  "Draw a solid block overlay from BEG to END in FACE."
+  (let* ((width (string-width (buffer-substring-no-properties beg end)))
+         (bar (propertize (make-string width ?█) 'face face))
+         (ov (make-overlay beg end)))
+    (overlay-put ov 'face face)
+    (overlay-put ov 'display bar)
+    (overlay-put ov 'priority 90)
+    (push ov simply-kanban--running-overlays)))
 
 (defun simply-kanban--highlight-running-card ()
-  "Draw the card with the running clock using a double-line outline.
-The whole top, bottom, and divider rules are replaced, while other lines
-contribute only their left and right border characters.  Clear any previous
-outline first."
+  "Draw a solid block outline around the running card.
+The blocks use the card's own outline colour.  Clear any previous running
+highlight first."
   (mapc #'delete-overlay simply-kanban--running-overlays)
   (setq simply-kanban--running-overlays nil)
-  (let ((card (simply-kanban--running-card-marker)))
+  (let* ((card (simply-kanban--running-card-marker))
+         (regions (simply-kanban--card-regions card)))
     (setq simply-kanban--running-card card)
     (setq simply-kanban--running-clock-state (simply-kanban--clock-state))
-    (dolist (region (simply-kanban--card-regions card))
-      (let ((beg (car region))
-            (end (cdr region)))
-        (when (< beg end)
-          (let ((pieces
-                 (if (memq (char-after beg) '(?┌ ?├ ?└))
-                     (list (cons beg end))
-                   (list (cons beg (1+ beg))
-                         (cons (1- end) end)))))
-            (dolist (piece pieces)
-              (let* ((pbeg (car piece))
-                     (pend (cdr piece))
-                     (outline (propertize
-                               (simply-kanban--double-outline
-                                (buffer-substring-no-properties pbeg pend))
-                               'face 'simply-kanban-running-card))
-                     (ov (make-overlay pbeg pend)))
-                (overlay-put ov 'face 'simply-kanban-running-card)
-                (overlay-put ov 'display outline)
-                (overlay-put ov 'priority 90)
-                (push ov simply-kanban--running-overlays)))))))))
+    (when regions
+      (let* ((top (car regions))
+             (bottom (car (last regions)))
+             (middle (butlast (cdr regions)))
+             (face (or (get-text-property (car top) 'face)
+                       'simply-kanban-column-header)))
+        (simply-kanban--running-block-overlay (car top) (cdr top) face)
+        (unless (equal top bottom)
+          (simply-kanban--running-block-overlay
+           (car bottom) (cdr bottom) face))
+        (dolist (region middle)
+          (when (< (car region) (cdr region))
+            (simply-kanban--running-block-overlay
+             (car region) (1+ (car region)) face)
+            (simply-kanban--running-block-overlay
+             (1- (cdr region)) (cdr region) face)))))))
 
 (defun simply-kanban--sync-running-card ()
   "Refresh the board when the active clock changes."
@@ -2207,6 +2431,7 @@ outline first."
     (define-key map (kbd "N") #'simply-kanban-add-note)
     (define-key map (kbd "L") #'simply-kanban-toggle-logbook)
     (define-key map (kbd "c") #'simply-kanban-toggle-compact)
+    (define-key map (kbd "v") #'simply-kanban-toggle-stories)
     (define-key map (kbd "#") #'simply-kanban-set-sprint)
     (define-key map (kbd "i") #'simply-kanban-clock-in)
     (define-key map (kbd "o") #'simply-kanban-clock-out)
@@ -2284,7 +2509,14 @@ Used to build the board buffer name."
   (setq-local truncate-lines t)
   (setq-local cursor-type 'box)
   (setq-local mode-line-buffer-identification
-              (list (propertize "%b" 'face 'mode-line-buffer-id)))
+              (list (propertize "%b" 'face 'mode-line-buffer-id)
+                    '(:eval
+                      (when simply-kanban--sprint-filter
+                        (concat " "
+                                (propertize
+                                 (format "[sprint: %s]"
+                                         simply-kanban--sprint-filter)
+                                 'face 'warning))))))
   (setq header-line-format
         '(" "
           ;; Status indicators lead the header line so a narrow window
@@ -2292,11 +2524,6 @@ Used to build the board buffer name."
           ;; with single spaces, and the whole group is followed by one.
           (:eval
            (let (parts)
-             (when simply-kanban--sprint-filter
-               (push (propertize
-                      (format "[sprint: %s]" simply-kanban--sprint-filter)
-                      'face 'warning)
-                     parts))
              (when (org-clock-is-active)
                (push (propertize
                       (format "[clock: %s]"
@@ -2308,6 +2535,8 @@ Used to build the board buffer name."
                (push (propertize (format "[tag: %s]" simply-kanban--tag-filter)
                                  'face 'success)
                      parts))
+             (when simply-kanban--show-stories
+               (push (propertize "[stories]" 'face 'success) parts))
              (if parts
                  (concat (mapconcat #'identity (nreverse parts) " ") " ")
                "")))
@@ -2318,7 +2547,7 @@ Used to build the board buffer name."
           (:eval (propertize "L" 'face 'help-key-binding)) " log  "
           (:eval (propertize "i/o" 'face 'help-key-binding)) " clock  "
           (:eval (propertize "#" 'face 'help-key-binding)) " card sprint  "
-          (:eval (propertize "S" 'face 'help-key-binding)) " sprint-filter"))
+          (:eval (propertize "S" 'face 'help-key-binding)) " sprint"))
   (add-hook 'post-command-hook #'simply-kanban--highlight-card nil t)
   (add-hook 'post-command-hook #'simply-kanban--sync-running-card nil t))
 
@@ -2359,6 +2588,7 @@ Used to build the board buffer name."
     ("E" "expand all"       simply-kanban-toggle-expand-all :transient t)
     ("L" "show logbook"     simply-kanban-toggle-logbook :transient t)
     ("c" "compact cards"    simply-kanban-toggle-compact :transient t)
+    ("v" "show stories"     simply-kanban-toggle-stories :transient t)
     ("F" "follow mode"      simply-kanban-toggle-follow :transient t)]
    ["Board"
     ("t" "filter by tag"    simply-kanban-set-tag-filter)
@@ -2386,7 +2616,8 @@ to the window."
             (and simply-kanban-default-sprint
                  (string-trim (format "%s" simply-kanban-default-sprint)))
             simply-kanban--title-length simply-kanban-max-title-length
-            simply-kanban--compact-cards simply-kanban-compact-cards))
+            simply-kanban--compact-cards simply-kanban-compact-cards
+            simply-kanban--show-stories simply-kanban-show-stories))
     (pop-to-buffer buffer)
     (simply-kanban--render spec)
     buffer))

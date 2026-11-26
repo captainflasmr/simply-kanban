@@ -58,6 +58,134 @@
     (should (string-prefix-p "┌" (car lines)))
     (should (string-prefix-p "└" (car (last lines))))))
 
+(ert-deftest sk-test-collect-ticket-types ()
+  "`--collect-tasks' identifies stories, tasks, parents, and child counts."
+  (sk-test-with-org (concat "#+TODO: TODO DOING | DONE\n\n"
+                            "* TODO Epic\n"
+                            ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
+                            "** TODO Child one\n"
+                            "** DONE Child two\n"
+                            "* TODO Leaf\n")
+    (let* ((tasks (simply-kanban--collect-tasks src))
+           (story (seq-find (lambda (tk) (string= "Epic" (plist-get tk :title)))
+                            tasks))
+           (child (seq-find (lambda (tk) (string= "Child one" (plist-get tk :title)))
+                            tasks))
+           (leaf (seq-find (lambda (tk) (string= "Leaf" (plist-get tk :title)))
+                           tasks)))
+      (should (eq 'story (plist-get story :type)))
+      (should (= 2 (plist-get story :children)))
+      (should (= 1 (plist-get story :children-done)))
+      (should (= 2 (length (plist-get story :child-tasks))))
+      (should (equal '("Child one" "Child two")
+                     (mapcar (lambda (ct) (plist-get ct :title))
+                             (plist-get story :child-tasks))))
+      (should (eq t (plist-get (nth 1 (plist-get story :child-tasks)) :done)))
+      (should-not (plist-get story :parent))
+      (should (eq 'task (plist-get child :type)))
+      (should (string= "Epic" (plist-get child :parent)))
+      (should (zerop (plist-get child :children)))
+      (should (eq 'task (plist-get leaf :type)))
+      (should-not (plist-get leaf :parent)))))
+
+(ert-deftest sk-test-jira-number ()
+  "`--jira-number' parses an issue key at the start of a title."
+  (should (string= "MM-1472" (simply-kanban--jira-number "MM-1472 Scenario")))
+  (should-not (simply-kanban--jira-number "Scenario MM-1472"))
+  (should-not (simply-kanban--jira-number "No number")))
+
+(ert-deftest sk-test-bold-jira-number ()
+  "`--bold-jira-number' adds the Jira face to the key only."
+  (let* ((text (simply-kanban--bold-jira-number "MM-1472 Scenario"))
+         (face (get-text-property 0 'face text)))
+    (should (memq 'simply-kanban-jira
+                  (if (listp face) face (list face)))))
+  (should (string= "No number"
+                   (simply-kanban--bold-jira-number "No number"))))
+
+(ert-deftest sk-test-format-card-bold-jira ()
+  "A card title shows its Jira number in bold."
+  (let* ((lines (simply-kanban--format-card
+                 (list :keyword "TODO" :title "MM-1472 Scenario")
+                 40))
+         (line (cl-find-if (lambda (l) (string-match-p "MM-1472" l))
+                           lines)))
+    (should line)
+    (let ((face (get-text-property (string-match "MM-1472" line) 'face line)))
+      (should (memq 'simply-kanban-jira
+                    (if (listp face) face (list face)))))))
+
+(ert-deftest sk-test-collect-jira-numbers ()
+  "Cards carry their own and their parent's parsed Jira numbers."
+  (sk-test-with-org (concat "#+TODO: TODO | DONE\n\n"
+                            "* TODO MM-100 Story\n"
+                            "** TODO MM-101 Task\n")
+    (let* ((tasks (simply-kanban--collect-tasks src))
+           (story (seq-find (lambda (tk) (string= "MM-100 Story"
+                                                  (plist-get tk :title)))
+                            tasks))
+           (task (seq-find (lambda (tk) (string= "MM-101 Task"
+                                                 (plist-get tk :title)))
+                           tasks)))
+      (should (string= "MM-100" (plist-get story :jira)))
+      (should (string= "MM-101" (plist-get task :jira)))
+      (should (string= "MM-100" (plist-get task :parent-jira)))
+      (let ((child (car (plist-get story :child-tasks))))
+        (should (string= "MM-101 Task" (plist-get child :title)))
+        (should (string= "MM-101" (plist-get child :jira)))))))
+
+(ert-deftest sk-test-ticket-type-property ()
+  "A childless `TICKET_TYPE: STORY' heading is still a story."
+  (sk-test-with-org (concat "#+TODO: TODO | DONE\n\n"
+                            "* TODO Solo story\n"
+                            ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
+                            "* TODO Leaf\n")
+    (let ((tasks (simply-kanban--collect-tasks src)))
+      (should (eq 'story (plist-get (cl-first tasks) :type)))
+      (should (eq 'task (plist-get (cl-second tasks) :type))))))
+
+(ert-deftest sk-test-ticket-parent-non-todo-story ()
+  "A non-TODO `TICKET_TYPE: STORY' heading still names its tasks' parent."
+  (sk-test-with-org (concat "#+TODO: TODO | DONE\n\n"
+                            "* Story\n"
+                            ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
+                            "** TODO Child\n")
+    (let ((task (car (simply-kanban--collect-tasks src))))
+      (should (string= "Story" (plist-get task :parent))))))
+
+(ert-deftest sk-test-format-card-ticket-relations ()
+  "Tickets show their type, parent story, and child task count."
+  (let* ((simply-kanban--compact-cards nil)
+         (story (simply-kanban--format-card
+                 (list :keyword "TODO" :title "Epic" :type 'story
+                       :children 3 :children-done 1)
+                 60))
+         (task (simply-kanban--format-card
+                (list :keyword "TODO" :title "Leaf" :type 'task
+                      :parent "Epic")
+                60)))
+    (should (cl-some (lambda (l) (string-match-p "STORY" l)) story))
+    (should (cl-some (lambda (l) (string-match-p "parent of 3 tasks (1 done)" l))
+                     story))
+    (should (cl-some (lambda (l) (string-match-p "TASK" l)) task))
+    (should (cl-some (lambda (l) (string-match-p "child of Epic" l)) task)))
+  (let* ((simply-kanban--compact-cards t)
+         (task (simply-kanban--format-card
+                (list :keyword "TODO" :title "MM-2 Leaf" :type 'task
+                      :parent "Some other story" :parent-jira "MM-1")
+                60)))
+    (should (cl-some (lambda (l) (string-match-p "TASK (MM-1)" l)) task))))
+
+(ert-deftest sk-test-ticket-relations-hidden ()
+  "`simply-kanban-show-ticket-types' hides the relationship line."
+  (let* ((simply-kanban-show-ticket-types nil)
+         (lines (simply-kanban--format-card
+                 (list :keyword "TODO" :title "Leaf" :type 'task
+                       :parent "Epic")
+                 60)))
+    (should-not (cl-some (lambda (l) (string-match-p "TASK" l)) lines))
+    (should-not (cl-some (lambda (l) (string-match-p "child of Epic" l)) lines))))
+
 ;;; Data collection
 
 (ert-deftest sk-test-source-keywords ()
@@ -125,8 +253,9 @@
                 30)))
     (should (cl-some (lambda (l)
                        (string-match-p
-                        (regexp-quote "2:00 5 1h 1h") l))
+                        (regexp-quote "2:00 1h") l))
                      lines))
+    (should-not (cl-some (lambda (l) (string-match-p " 5" l)) lines))
     (should-not (cl-some (lambda (l) (string-match-p "Effort:" l)) lines))
     (should-not (cl-some (lambda (l) (string-match-p "Points:" l)) lines))
     (should-not (cl-some (lambda (l) (string-match-p "Clocked:" l)) lines))
@@ -134,7 +263,7 @@
                          lines))))
 
 (ert-deftest sk-test-format-card-compact-durations ()
-  "Compact cards render clocked and remaining time with colons."
+  "Compact cards render remaining time with colons but omit clocked time."
   (let ((org-duration-units '(("min" . 1) ("h" . 60) ("d" . 444))))
     (let* ((lines (simply-kanban--format-card
                    (list :keyword "TODO" :title "x" :clocked 527
@@ -143,7 +272,8 @@
            (meta (cl-find-if (lambda (l) (string-match-p "1d:1h:23m" l))
                              lines)))
       (should meta)
-      (should (string-match-p "1d:1h:23m 1d:1h:23m" meta)))))
+      (should (string-match-p "1d:1h:23m" meta))
+      (should-not (string-match-p "1d:1h:23m 1d:1h:23m" meta)))))
 
 (ert-deftest sk-test-format-card-compact-context ()
   "Compact cards keep sprint, tags, board, and file in the metadata line."
@@ -221,7 +351,7 @@
                  (list (list :points nil))))))
 
 (ert-deftest sk-test-format-card-shows-points ()
-  "A card with story points renders a badge; the toggle hides it."
+  "Story points appear in detailed cards; compact cards omit them."
   (let ((simply-kanban-show-story-points t)
         (simply-kanban--compact-cards nil))
     (let ((lines (simply-kanban--format-card
@@ -230,6 +360,12 @@
     (let ((lines (simply-kanban--format-card
                   (list :keyword "TODO" :title "x") 24)))
       (should-not (cl-some (lambda (l) (string-match-p "Points:" l)) lines))))
+  (let ((simply-kanban-show-story-points t)
+        (simply-kanban--compact-cards t))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :points 5) 24)))
+      (should-not (cl-some (lambda (l) (string-match-p "Points:" l)) lines))
+      (should-not (cl-some (lambda (l) (string-match-p " 5" l)) lines))))
   (let ((simply-kanban-show-story-points nil)
         (simply-kanban--compact-cards nil))
     (let ((lines (simply-kanban--format-card
@@ -271,7 +407,14 @@
         (simply-kanban--compact-cards nil))
     (let ((lines (simply-kanban--format-card
                   (list :keyword "TODO" :title "x" :clocked 90) 24)))
-      (should-not (cl-some (lambda (l) (string-match-p "Clocked:" l)) lines)))))
+      (should-not (cl-some (lambda (l) (string-match-p "Clocked:" l)) lines))))
+  (let ((simply-kanban-show-clock t)
+        (simply-kanban--compact-cards t))
+    (let ((lines (simply-kanban--format-card
+                  (list :keyword "TODO" :title "x" :clocked 90 :clocking t)
+                  24)))
+      (should-not (cl-some (lambda (l) (string-match-p "1:30" l)) lines))
+      (should-not (cl-some (lambda (l) (string-match-p "(run)" l)) lines)))))
 
 (ert-deftest sk-test-remaining-minutes ()
   "`--remaining-minutes' subtracts clocked time from the effort estimate."
@@ -682,6 +825,86 @@ BODY runs with `board' current."
   (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO a\n* TODO b\n* DONE c\n"
     (should (= 3 (length (simply-kanban--anchors))))))
 
+(ert-deftest sk-test-board-ticket-types ()
+  "Story and task cards show their type and hierarchy on the board."
+  (let ((simply-kanban--show-stories t))
+    (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                                "* TODO MM-100 Epic\n"
+                                ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
+                                "** TODO MM-101 Child task\n")
+      (should (string-match-p "STORY 1 task" (buffer-string)))
+      (should (string-match-p "TASK (MM-100)" (buffer-string)))
+      (should (string-match-p "╔" (buffer-string)))
+      (should (string-match-p "╗" (buffer-string)))
+      (should (string-match-p "║" (buffer-string)))
+      (should (string-match-p "╚" (buffer-string)))
+      (should (string-match-p "╝" (buffer-string))))))
+
+(ert-deftest sk-test-board-stories-hidden-by-default ()
+  "Stories are hidden by default; task cards still name their parent."
+  (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                              "* TODO MM-100 Story\n"
+                              ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
+                              "** TODO MM-101 Task\n")
+    (should-not (string-match-p "STORY" (buffer-string)))
+    (should (string-match-p "TASK (MM-100)" (buffer-string)))))
+
+(ert-deftest sk-test-toggle-stories ()
+  "The stories toggle shows and hides story cards on the board."
+  (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                              "* TODO MM-100 Story\n"
+                              ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
+                              "** TODO MM-101 Task\n")
+    (should-not (string-match-p "STORY" (buffer-string)))
+    (simply-kanban-toggle-stories)
+    (should simply-kanban--show-stories)
+    (should (string-match-p "STORY 1 task" (buffer-string)))
+    (simply-kanban-toggle-stories)
+    (should-not simply-kanban--show-stories)
+    (should-not (string-match-p "STORY" (buffer-string)))))
+
+(ert-deftest sk-test-expanded-story-lists-tasks ()
+  "Expanding a story lists all of its child tasks."
+  (let ((simply-kanban--show-stories t))
+    (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                                "* TODO MM-100 Story\n"
+                                ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
+                                "** TODO MM-101 Child one\n"
+                                "** DONE MM-102 Child two\n")
+      (goto-char (point-min))
+      (simply-kanban-next-card)
+      (should-not (string-match-p (regexp-quote "- TODO MM-101")
+                                  (buffer-string)))
+      (simply-kanban-toggle-expand)
+      (should (string-match-p "Tasks" (buffer-string)))
+      (should (string-match-p (regexp-quote "- TODO MM-101 Child one")
+                              (buffer-string)))
+      (should (string-match-p (regexp-quote "- DONE MM-102 Child two")
+                              (buffer-string)))
+      (goto-char (point-min))
+      (should (re-search-forward "- TODO \\(MM-101\\)" nil t))
+      (let ((face (get-text-property (match-beginning 1) 'face)))
+        (should (memq 'simply-kanban-jira
+                      (if (listp face) face (list face))))))))
+
+(ert-deftest sk-test-stories-option-on-open ()
+  "`simply-kanban-show-stories' chooses whether stories appear at startup."
+  (sk-test-with-org (concat "#+TODO: TODO | DONE\n\n"
+                            "* TODO MM-100 Story\n"
+                            ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
+                            "** TODO MM-101 Task\n")
+    (let ((simply-kanban-show-stories t)
+          (simply-kanban-buffer-name "*sk-test-stories-option*")
+          board)
+      (unwind-protect
+          (progn
+            (setq board (simply-kanban--open (cons 'buffer src)))
+            (with-current-buffer board
+              (should simply-kanban--show-stories)
+              (should (string-match-p "STORY 1 task" (buffer-string)))))
+        (when (buffer-live-p board)
+          (kill-buffer board))))))
+
 (ert-deftest sk-test-all-boards-render ()
   "Rendering an all-boards spec shows every board's cards, denoting the board."
   (sk-test-with-org (concat "* Project Alpha\n** TODO design\n** TODO build\n"
@@ -895,6 +1118,7 @@ BODY runs with `board' current."
   (should (eq (lookup-key simply-kanban-mode-map "T") 'simply-kanban-clear-tag-filter))
   (should (eq (lookup-key simply-kanban-mode-map "F") 'simply-kanban-toggle-follow))
   (should (eq (lookup-key simply-kanban-mode-map "c") 'simply-kanban-toggle-compact))
+  (should (eq (lookup-key simply-kanban-mode-map "v") 'simply-kanban-toggle-stories))
   (should (eq (lookup-key simply-kanban-mode-map ";") 'simply-kanban-set-effort))
   (should (eq (lookup-key simply-kanban-mode-map "P") 'simply-kanban-set-story-points))
   (should (eq (lookup-key simply-kanban-mode-map "#") 'simply-kanban-set-sprint))
@@ -913,20 +1137,40 @@ BODY runs with `board' current."
                      (t "")))
              header-line-format ""))
 
+(defun sk-test--mode-line-buffer-string ()
+  "Evaluate the board's mode-line buffer identification to a plain string."
+  (mapconcat (lambda (piece)
+               (cond ((stringp piece) piece)
+                     ((and (consp piece) (eq (car piece) :eval))
+                      (or (eval (cadr piece) t) ""))
+                     (t "")))
+             mode-line-buffer-identification ""))
+
 (ert-deftest sk-test-header-line-indicators-first ()
-  "The sprint and clock indicators lead the header line."
+  "The clock indicator leads the header line."
   (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO a\n"
     (let ((simply-kanban--sprint-filter "2"))
       (cl-letf (((symbol-function 'org-clock-is-active) (lambda () t))
                 ((symbol-function 'org-clock-get-clocked-time) (lambda () 90)))
         (let ((line (sk-test--header-line-string)))
-          (should (string-prefix-p " [sprint: 2] [clock: 1:30] " line))
+          (should (string-prefix-p " [clock: 1:30] " line))
+          (should-not (string-match-p (regexp-quote "[sprint:") line))
           (should (string-match-p (regexp-quote "] ? menu") line))
           (should-not (string-match-p "follow" line))
           (should (string-match-p (regexp-quote "? menu") line))
           (should-not (string-match-p "SPC" line))
           (should-not (string-match-p "status" line))
           (should-not (string-match-p "quit" line)))))))
+
+(ert-deftest sk-test-mode-line-sprint-indicator ()
+  "The sprint filter appears in the mode line, not the header line."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO a\n"
+    (should-not (string-match-p "sprint" (sk-test--mode-line-buffer-string)))
+    (let ((simply-kanban--sprint-filter "2"))
+      (should (string-match-p (regexp-quote "[sprint: 2]")
+                              (sk-test--mode-line-buffer-string)))
+      (should-not (string-match-p (regexp-quote "[sprint:")
+                                  (sk-test--header-line-string))))))
 
 ;;; Dynamic column width
 
@@ -1003,8 +1247,7 @@ BODY runs with `board' current."
           (simply-kanban-clock-in)
           (should (org-clock-is-active))
           (with-current-buffer board
-            (should (string-match-p "0m (run)"
-                                    (buffer-string))))
+            (should-not (string-match-p "(run)" (buffer-string))))
           (simply-kanban-clock-out)
           (should-not (org-clock-is-active))
           (with-current-buffer src
@@ -1014,7 +1257,7 @@ BODY runs with `board' current."
         (org-clock-out)))))
 
 (ert-deftest sk-test-highlight-running-card ()
-  "The card with the running clock gets a double-line outline."
+  "The running card gets a solid block outline."
   (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n"
     (goto-char (point-min))
     (simply-kanban-next-card)
@@ -1024,57 +1267,56 @@ BODY runs with `board' current."
           (should (simply-kanban--same-card-p
                    simply-kanban--running-card
                    (simply-kanban--marker-at-point)))
-          (should simply-kanban--running-overlays)
-          (should (seq-every-p
-                   (lambda (ov)
-                     (eq (overlay-get ov 'face) 'simply-kanban-running-card))
-                   simply-kanban--running-overlays))
-          (should (seq-every-p
-                   (lambda (ov)
-                     (and (memq (char-after (overlay-start ov))
-                                '(?│ ?┌ ?├ ?└))
-                          (memq (char-before (overlay-end ov))
-                                '(?│ ?┐ ?┤ ?┘))))
-                   simply-kanban--running-overlays))
-          (should (seq-every-p
-                   (lambda (ov)
-                     (let ((outline (substring-no-properties
-                                     (overlay-get ov 'display))))
-                       (and (stringp outline)
-                            (= (string-width outline)
-                               (- (overlay-end ov) (overlay-start ov)))
-                            (seq-every-p
-                             (lambda (ch)
-                               (memq ch '(?╔ ?═ ?╗ ?║ ?╚ ?╝ ?╠ ?╣)))
-                             (string-to-list outline)))))
-                   simply-kanban--running-overlays))
-          (should (seq-some
-                   (lambda (ov)
-                     (string-match-p
-                      "╔.*╗" (substring-no-properties
+          (let* ((card (simply-kanban--marker-at-point))
+                 (regions (simply-kanban--card-regions card))
+                 (top (car regions))
+                 (bottom (car (last regions)))
+                 (middle (butlast (cdr regions)))
+                 (face (simply-kanban--keyword-face "TODO")))
+            (should (> (length regions) 2))
+            (dolist (region (list top bottom))
+              (should (seq-some
+                       (lambda (ov)
+                         (and (= (overlay-start ov) (car region))
+                              (= (overlay-end ov) (cdr region))))
+                       simply-kanban--running-overlays)))
+            (dolist (region middle)
+              (should (seq-some
+                       (lambda (ov)
+                         (and (= (overlay-start ov) (car region))
+                              (= (overlay-end ov) (1+ (car region)))))
+                       simply-kanban--running-overlays))
+              (should (seq-some
+                       (lambda (ov)
+                         (and (= (overlay-start ov) (1- (cdr region)))
+                              (= (overlay-end ov) (cdr region))))
+                       simply-kanban--running-overlays)))
+            (dolist (ov simply-kanban--running-overlays)
+              (let ((display (substring-no-properties
                               (overlay-get ov 'display))))
-                   simply-kanban--running-overlays))
-          (should (seq-some
-                   (lambda (ov)
-                     (string= "║" (substring-no-properties
-                                   (overlay-get ov 'display))))
-                   simply-kanban--running-overlays))
+                (should (eq (overlay-get ov 'face) face))
+                (should (= (string-width display)
+                           (- (overlay-end ov) (overlay-start ov))))
+                (should (seq-every-p (lambda (ch) (eq ch ?█))
+                                     (string-to-list display))))))
           (simply-kanban-clock-out)
           (should-not simply-kanban--running-card)
           (should-not simply-kanban--running-overlays))
       (when (org-clock-is-active)
         (org-clock-out)))))
 
-(ert-deftest sk-test-running-card-title-uppercase ()
-  "The running card's title is uppercase and reverts on clock-out."
+(ert-deftest sk-test-running-card-title-case ()
+  "Clocking in leaves the card title in its original case."
   (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n* TODO Beta\n"
     (goto-char (point-min))
     (simply-kanban-next-card)
     (unwind-protect
         (progn
           (simply-kanban-clock-in)
-          (should (string-match-p "ALPHA" (buffer-string)))
-          (should (string-match-p "Beta" (buffer-string)))
+          (let ((case-fold-search nil))
+            (should (string-match-p "Alpha" (buffer-string)))
+            (should-not (string-match-p "ALPHA" (buffer-string)))
+            (should (string-match-p "Beta" (buffer-string))))
           (simply-kanban-clock-out)
           (should (string-match-p "Alpha" (buffer-string))))
       (when (org-clock-is-active)

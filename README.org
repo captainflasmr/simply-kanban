@@ -45,7 +45,7 @@ Open an Org file with TODO headings and run =M-x simply-kanban= for a board of t
 
 In an aggregated board the columns are the *union* of the agenda files' TODO keywords, and each card shows which file it comes from (=» file.org=).  Moving a card follows that card's *own* file workflow and is written back to that file, so files using different keyword sequences coexist safely.
 
-The board buffer's name identifies its source, and the header line shows the status indicators and key reminders.  Columns expand to fill the board window; after resizing the window press =g= to refit them.
+The board buffer's name identifies its source, the active sprint filter appears in the mode line, and the header line shows the remaining status indicators and key reminders.  Columns expand to fill the board window; after resizing the window press =g= to refit them.
 
 | Key       | Action                                               |
 |-----------+------------------------------------------------------|
@@ -70,6 +70,7 @@ The board buffer's name identifies its source, and the header line shows the sta
 | =N=       | add a timestamped note to the card at point           |
 | =L=       | toggle the card's LOGBOOK drawer on the board         |
 | =c=       | toggle compact single-line card metadata             |
+| =v=       | show/hide STORY cards                                |
 | =l=       | set the max card-title length (empty = no limit)     |
 | =F=       | toggle follow mode (show heading as you move)        |
 | =B=       | switch board (multi-board files only)                |
@@ -90,7 +91,7 @@ To rebind it, e.g.:
   (define-key org-mode-map (kbd "C-c k") #'simply-kanban-show-card))
 #+end_src
 
-Cards are deliberately compact: by default a card shows its title (prefixed by a priority cookie such as =[#A]= only when one is set), one metadata line, and a progress bar when it has progress data.  The metadata line lists the board and source-file markers when present, then effort, story points, clocked time, remaining or over-budget time, sprint, and tags, omitting values the card lacks; numeric values carry no labels and the sprint value has no =Sprint:= prefix (see [[*Card layout]]).  Press =;= to set the effort with Org's native prompt (=org-set-effort=); each column header then sums its cards' efforts in brackets (=[2:00]=), giving a Jira-style per-stage workload total.  Story points live in the =STORY_POINTS= property: press =P= to set them, a card shows them in its metadata line, and each column header sums its cards' points in parentheses (=(8 pts)=).  Cards with clock entries show their clocked time; a running clock adds =(run)=.  Once a card has clocked time it also shows the remaining time, calculated as Effort minus clocked time (floored at zero); a card whose clocked time exceeds its estimate instead shows over-budget time prefixed with =+= in the warning face.  Press =i= to clock in the card at point and =o= to clock out the running clock.  Press =c= to switch to the detailed layout, where each value gets its own labelled line (=Effort: 2:00=, =Points: 5=, =Clocked: 1:30=, and =Remaining: 1d 3h 42m= or =Over: 30m=).  Set =simply-kanban-show-clock-total= to add each column's clocked total in braces (={1:30}=) after the effort total, =simply-kanban-show-remaining-total= to add its remaining total in angle brackets (=<1d 3h 42m>=), and =simply-kanban-show-over-total= to add its over-budget total after an exclamation mark (=!30m=).  Press =e= to expand a card and show the heading's body text inline.  When you reveal a heading with =RET= (or while follow mode is on) the target heading line briefly pulses, and focus stays on the board.
+Cards are deliberately compact: by default a card shows its title (prefixed by a priority cookie such as =[#A]= only when one is set), a type/hierarchy line when the card is a story or has a parent task relationship, one metadata line, and a progress bar when it has progress data.  The metadata line lists the board and source-file markers when present, then effort, remaining or over-budget time, sprint, and tags, omitting values the card lacks; numeric values carry no labels and the sprint value has no =Sprint:= prefix (see [[*Card layout]]).  Press =;= to set the effort with Org's native prompt (=org-set-effort=); each column header then sums its cards' efforts in brackets (=[2:00]=), giving a Jira-style per-stage workload total.  Story points live in the =STORY_POINTS= property: press =P= to set them, the detailed layout shows them as =Points: 5=, and each column header sums its cards' points in parentheses (=(8 pts)=).  In the detailed layout, cards with clock entries show their clocked time; a running clock adds =(run)=.  Once a card has clocked time it also shows the remaining time, calculated as Effort minus clocked time (floored at zero); a card whose clocked time exceeds its estimate instead shows over-budget time prefixed with =+= in the warning face.  Press =i= to clock in the card at point and =o= to clock out the running clock.  Press =c= to switch to the detailed layout, where each value gets its own labelled line (=Effort: 2:00=, =Points: 5=, =Clocked: 1:30=, and =Remaining: 1d 3h 42m= or =Over: 30m=).  Set =simply-kanban-show-clock-total= to add each column's clocked total in braces (={1:30}=) after the effort total, =simply-kanban-show-remaining-total= to add its remaining total in angle brackets (=<1d 3h 42m>=), and =simply-kanban-show-over-total= to add its over-budget total after an exclamation mark (=!30m=).  Press =e= to expand a card and show the heading's body text inline.  When you reveal a heading with =RET= (or while follow mode is on) the target heading line briefly pulses, and focus stays on the board.
 
 * Multiple boards in one file
 
@@ -123,7 +124,7 @@ Sprints are a plain Org property, not a date range: tag a heading with a =SPRINT
 #+end_src
 
 - Press =#= on a card to set (or, with empty input, remove) its =SPRINT=, using a free-text prompt — written straight back to the Org heading.
-- Press =S= to display only one sprint; the prompt offers the sprint values present on the board and accepts any text, and empty input clears the filter to show every sprint again.  The active sprint shows in the header-line as =[sprint: TEXT]=.
+- Press =S= to display only one sprint; the prompt offers the sprint values present on the board and accepts any text, and empty input clears the filter to show every sprint again.  The active sprint shows in the mode line as =[sprint: TEXT]=.
 - When *no* sprint filter is active each card shows its own =Sprint: TEXT= badge so you can see the spread; once you filter to a single sprint that badge is hidden (every visible card shares it).
 
 The =SPRINT= property is read with inheritance, so setting =:SPRINT:= on a board container (or any parent heading) applies to all the TODO headings beneath it unless a child overrides it — handy for assigning a whole board to a sprint at once.
@@ -158,9 +159,9 @@ Each row reports the sprint, task count, done count, story points, effort-weight
 
 * Clocking
 
-The board reads the source headings' Org clock entries, so time clocked anywhere in Org is visible on the cards.  Press =i= to clock in the card at point and =o= to clock out whichever task is running.  The active clock is shown in the header line, the outline of its card is drawn with double-line box characters in the =simply-kanban-running-card= face, its title is shown in uppercase, and it displays =Clocked: 1:30 (run)=.  Started cards also show the time left, =Remaining: 1d 3h 42m=, calculated from the Effort estimate minus clocked time; a =DONE= card has zero remaining, and a card whose clocked time exceeds its estimate shows =Over: 30m= instead.  The day length in that format follows =org-duration-units= from the source Org buffer, so the project's 37-hour week renders one day as =7h24m= even when the board buffer itself is not visiting that file.
+The board reads the source headings' Org clock entries, so time clocked anywhere in Org is visible on the cards.  Press =i= to clock in the card at point and =o= to clock out whichever task is running.  The active clock is shown in the header line, a solid block outline is drawn around the entire card in the ticket's colour, and the detailed layout displays =Clocked: 1:30 (run)=.  Started cards also show the time left, =Remaining: 1d 3h 42m=, calculated from the Effort estimate minus clocked time; a =DONE= card has zero remaining, and a card whose clocked time exceeds its estimate shows =Over: 30m= instead.  The day length in that format follows =org-duration-units= from the source Org buffer, so the project's 37-hour week renders one day as =7h24m= even when the board buffer itself is not visiting that file.
 
-- =simply-kanban-show-clock= (default =t=) — show each card's clocked time and the active clock marker.
+- =simply-kanban-show-clock= (default =t=) — show each card's clocked time and the active clock marker in the detailed layout; compact cards omit clocked time.
 - =simply-kanban-show-clock-total= (default =nil=) — append each column's summed clocked time in braces (={1:30}=) after its effort total.
 - =simply-kanban-show-remaining= (default =t=) — show remaining time on started cards.
 - =simply-kanban-show-remaining-total= (default =nil=) — append each column's summed remaining time in angle brackets (=<1d 3h 42m>=) after its effort total.
@@ -175,9 +176,28 @@ Press =N= on a card to add a timestamped note with Org's native note prompt (=or
 
 * Card layout
 
-By default cards use a compact layout: the title is followed by one metadata line and then the progress bar.  The metadata line lists the board and source-file markers when present, then effort, story points, clocked time, remaining or over-budget time, sprint, and tags, skipping absent values.  Values are separated by spaces, numeric values are unlabelled, durations use colon-separated units (so =1d:1h:23m= is one day, one hour and 23 minutes), and the sprint value appears without a =Sprint:= prefix.  For example, =4:00 5 1h:30m 1h= reads as effort, points, clocked, and remaining; the faces distinguish them.  A running clock adds =(run)= and over-budget time is prefixed with =+=.  The line is truncated with an ellipsis when the column is too narrow.  Press =c= (=simply-kanban-toggle-compact=) to toggle the current board between the compact and detailed layouts.  The detailed layout puts each value on its own labelled line, as in =Effort: 2:00= or =Remaining: 1d 3h 42m=.
+By default cards use a compact layout: the title is followed by one metadata line and then the progress bar.  The metadata line lists the board and source-file markers when present, then effort, remaining or over-budget time, sprint, and tags, skipping absent values.  Values are separated by spaces, numeric values are unlabelled, durations use colon-separated units (so =1d:1h:23m= is one day, one hour and 23 minutes), and the sprint value appears without a =Sprint:= prefix.  For example, =4:00 1h= reads as effort and remaining; the faces distinguish them.  Story points and clocked time are omitted from this line and appear only in the detailed layout.  A running clock adds =(run)= in the detailed layout, and over-budget time is prefixed with =+=.  The line is truncated with an ellipsis when the column is too narrow.  Press =c= (=simply-kanban-toggle-compact=) to toggle the current board between the compact and detailed layouts.  The detailed layout puts each value on its own labelled line, as in =Effort: 2:00= or =Remaining: 1d 3h 42m=.
 
 - =simply-kanban-compact-cards= (default =t=) — start boards in the compact single-line metadata layout; set it to =nil= to start in the detailed layout.
+
+* Stories and tasks
+
+Ticket types are inferred from the Org hierarchy.  A TODO heading with TODO descendants is a =STORY=; leaf TODO headings are =TASK=s.  A childless heading can also be marked as a story by giving it a =TICKET_TYPE= property of =STORY=.  Ticket headings should start with a Jira number such as =MM-1472=; the board parses that key for the card and uses the parent's key in compact hierarchy labels.
+
+#+begin_example
+** TODO MM-1472 Scenario Specification
+:PROPERTIES:
+:TICKET_TYPE: STORY
+:END:
+*** TODO MM-1478 Agree MIMESIS namespace
+*** DOING MM-1479 Validate the example
+#+end_example
+
+A story is an ordinary TODO heading, so it has its own status, can be clocked, and moves independently of its child tasks.  Only TODO headings become cards, so give a story a TODO keyword (as in the example) when you want it on the board.  A non-TODO heading marked =TICKET_TYPE: STORY= still names the parent on its task cards, but is not itself a card; an unmarked grouping heading is just a container.  Story cards use a double-line outline in the =simply-kanban-story= face, while tasks use the normal single-line box.  Story cards are hidden by default; press =v= (=simply-kanban-toggle-stories=) or set =simply-kanban-show-stories= to show them.  Task cards keep their parent labels while stories are hidden, and the header line shows =[stories]= when stories are visible.  Jira numbers are shown in bold in card titles and hierarchy labels.  Cards carry a type/hierarchy line: compact cards use a short form (=STORY 3 tasks=, =TASK (MM-1472)=), while the detailed layout spells out =child of MM-1472 Scenario Specification= and =parent of 3 tasks (1 done)=.  Expanding a story with =e= lists all its child tasks under a =Tasks= divider, each with its TODO state, Jira key, and title.  Story cards also show the story's aggregated clocked time from Org's clock summary.
+
+- =simply-kanban-show-ticket-types= (default =t=) — show the type and hierarchy line on cards; set it to =nil= to hide it.
+- =simply-kanban-show-stories= (default =nil=) — show STORY cards on boards; when nil only TASK cards appear, though tasks still name their parent story.
+- =simply-kanban-jira-number-regexp= — regexp matching the Jira key at the start of a ticket title; the default accepts an uppercase prefix and digits, such as =MM-1472=.
 
 * Column progress
 
@@ -201,14 +221,17 @@ Each card with progress data also carries its own bar, drawn with the same fille
 - =simply-kanban-auto-refresh= (default =t=) — refresh the board automatically whenever its source Org buffer is saved.
 - =simply-kanban-sort-by-priority= (default =nil=) — when non-nil, sort cards within each column by priority (A > B > C > none).
 - =simply-kanban-show-effort= (default =t=) — show each card's Org =Effort= estimate (=Effort: 2:00=) and sum each column's efforts in brackets (=[2:00]=) in its header.
-- =simply-kanban-show-story-points= (default =t=) — show each card's =STORY_POINTS= (=Points: 5=) and sum each column's points in parentheses (=(8 pts)=) in its header.
-- =simply-kanban-show-clock= (default =t=) — show each card's clocked time (=Clocked: 1:30=) and mark a running clock with =(run)=.
+- =simply-kanban-show-story-points= (default =t=) — show each card's =STORY_POINTS= as =Points: 5= in the detailed layout and sum each column's points in parentheses (=(8 pts)=) in its header; compact cards omit the value.
+- =simply-kanban-show-clock= (default =t=) — show each card's clocked time (=Clocked: 1:30=) in the detailed layout and mark a running clock with =(run)=; compact cards omit the clocked value.
 - =simply-kanban-show-clock-total= (default =nil=) — append each column's summed clocked time in braces (={1:30}=) after its effort total.
 - =simply-kanban-show-remaining= (default =t=) — show =Remaining: 1d 3h 42m= on cards that have clocked time.
 - =simply-kanban-show-remaining-total= (default =nil=) — append each column's summed remaining time in angle brackets (=<1d 3h 42m>=) after its effort total.
 - =simply-kanban-show-over-total= (default =nil=) — append each column's summed over-budget time after an exclamation mark (=!30m=).
 - =simply-kanban-show-column-progress= (default =t=) — replace each column divider with a progress bar showing the completed share of its estimated effort.
 - =simply-kanban-show-card-progress= (default =t=) — show a progress bar inside each card, filled by its clocked time against its =Effort= estimate (=DONE= cards are fully filled).
+- =simply-kanban-show-ticket-types= (default =t=) — show each card's STORY/TASK type and its parent story or child task count.
+- =simply-kanban-show-stories= (default =nil=) — show STORY cards on boards; when nil only TASK cards appear, though tasks still name their parent story.  Toggle the current board with =v=.
+- =simply-kanban-jira-number-regexp= — regexp matching a Jira key at the start of a title; the default accepts keys such as =MM-1472=.
 - =simply-kanban-default-sprint= (default =nil=) — sprint text a board filters to when first opened; =nil= shows all sprints.  Change the displayed sprint live with =S=.
 - =simply-kanban-sprint-from-heading= (default =nil=) — when non-nil, derive a card's sprint from its nearest ancestor heading without a TODO keyword instead of requiring a =SPRINT= property.
 - =simply-kanban-show-sprint= (default =t=) — show a card's sprint (=Sprint: TEXT=) while no sprint filter is active.
@@ -218,7 +241,7 @@ Each card with progress data also carries its own bar, drawn with the same fille
 - =simply-kanban-all-boards= (default =t=) — in a multi-board file, offer an aggregate board (in the chooser and =B=) showing every board's cards at once, each card denoting its board.
 - =simply-kanban-all-boards-name= (default ="All Boards"=) — name of that aggregate entry.
 
-Faces: =simply-kanban-current-card= (focused card), =simply-kanban-running-card= (double-line outline of the card with the running clock), =simply-kanban-tag= (card tags), =simply-kanban-effort= (effort badge and column total), =simply-kanban-points= (story-points badge and column total), =simply-kanban-clock= (clocked-time badge), =simply-kanban-remaining= (remaining-time badge), =simply-kanban-over= (over-budget badge), =simply-kanban-sprint= (sprint badge), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
+Faces: =simply-kanban-current-card= (focused card), =simply-kanban-story= (STORY labels and double-line outlines), =simply-kanban-task= (TASK ticket label), =simply-kanban-jira= (bold Jira issue numbers), =simply-kanban-tag= (card tags), =simply-kanban-effort= (effort badge and column total), =simply-kanban-points= (story-points badge and column total), =simply-kanban-clock= (clocked-time badge), =simply-kanban-remaining= (remaining-time badge), =simply-kanban-over= (over-budget badge), =simply-kanban-sprint= (sprint badge), =simply-kanban-flash= (heading pulse), =simply-kanban-column-header=.
 
 * Kanban Feature Comparison Matrix
 
@@ -237,6 +260,7 @@ A cross-cutting view of how Simply Kanban sits among the other kanban options fo
 | Priority cookies shown          | No         | No        | Partial    | Yes           |
 | Effort estimate + column total  | No         | No        | No         | Yes           |
 | Story points + column total     | No         | No        | No         | Yes           |
+| Story/task type + hierarchy     | No         | No        | No         | Yes           |
 | Clocked time on cards           | No         | No        | No         | Yes           |
 | Remaining time on cards         | No         | No        | No         | Yes           |
 | Over-budget indicator           | No         | No        | No         | Yes           |
