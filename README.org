@@ -82,7 +82,7 @@ The board buffer's name identifies its source; the active sprint filter appears 
 | =SPC= / =?= | open the transient menu                            |
 | =q=       | quit                                                 |
 
-Press =SPC= (or =?=) for a =transient= menu grouping the commands (Move-Edit / Clock / Reveal / Board), modelled on the menu in [[https://github.com/captainflasmr/simply-annotate][simply-annotate]].
+Press =SPC= (or =?=) for a =transient= menu grouping the commands into four balanced columns (Move / Card / View / Board), modelled on the menu in [[https://github.com/captainflasmr/simply-annotate][simply-annotate]].
 
 Filters compose: =t= narrows by tag, =S= by sprint, and =a= by priority (=A=, =B=, =C=, or =none= for cards without one).  Active tag and priority filters appear in the header line, while the sprint filter appears in the mode line; clear them with =T=, =C=, and =A= respectively.
 

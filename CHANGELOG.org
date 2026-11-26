@@ -46,6 +46,7 @@ The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]
 - Compact cards no longer show story points; the detailed layout still shows the ~Points~ badge and column headers still sum points.
 - Compact cards no longer show clocked time; the detailed layout still shows the ~Clocked~ badge, compact cards still show remaining or over-budget time, and column headers still sum clocked time.
 - Compact cards no longer show effort; the detailed layout still shows the ~Effort~ badge and column headers still sum effort.
+- The transient menu is reorganised into four balanced columns — ~Move~, ~Card~, ~View~, and ~Board~ — with the clock commands folded into ~Card~ and the tag, sprint, and priority filters kept together under ~Board~.
 - The transient menu no longer has a Navigate group; use ~n~, ~p~, ~f~, and ~b~ directly on the board.
 - Card reordering now uses Vim-style ~j~ (move down) and ~k~ (move up) instead of ~M-n~ and ~M-p~; the delete-card binding moved from ~k~ to ~x~.  Both keys remain in the transient menu's Move / Edit group.
 

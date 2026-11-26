@@ -2819,23 +2819,23 @@ Used to build the board buffer name."
 (transient-define-prefix simply-kanban-transient ()
   "Transient menu for `simply-kanban'."
   [:description simply-kanban--transient-description
-   ["Move / Edit"
-    ("k" "move card up"     simply-kanban-move-card-up)
+   ["Move"
     ("j" "move card down"   simply-kanban-move-card-down)
-    ("}" "advance stage"   simply-kanban-advance :transient t)
-    ("{" "retreat stage"   simply-kanban-retreat :transient t)
-    ("s" "set status"      simply-kanban-set-status)
-    ("," "set priority"    simply-kanban-set-priority)
-    (":" "set tags"        simply-kanban-set-tags)
-    (";" "set effort"      simply-kanban-set-effort)
-    ("P" "story points"    simply-kanban-set-story-points)
-    ("N" "add note"        simply-kanban-add-note)
-    ("#" "set card sprint" simply-kanban-set-sprint)
-    ("x" "delete card"     simply-kanban-delete)]
-   ["Clock"
-    ("i" "clock in"        simply-kanban-clock-in)
-    ("o" "clock out"       simply-kanban-clock-out)]
-   ["Reveal"
+    ("k" "move card up"     simply-kanban-move-card-up)
+    ("}" "advance stage"    simply-kanban-advance :transient t)
+    ("{" "retreat stage"    simply-kanban-retreat :transient t)
+    ("s" "set status"       simply-kanban-set-status)
+    ("x" "delete card"      simply-kanban-delete)]
+   ["Card"
+    ("," "set priority"     simply-kanban-set-priority)
+    (":" "set tags"         simply-kanban-set-tags)
+    (";" "set effort"       simply-kanban-set-effort)
+    ("P" "story points"     simply-kanban-set-story-points)
+    ("#" "set sprint"       simply-kanban-set-sprint)
+    ("N" "add note"         simply-kanban-add-note)
+    ("i" "clock in"         simply-kanban-clock-in)
+    ("o" "clock out"        simply-kanban-clock-out)]
+   ["View"
     ("RET" "reveal heading" simply-kanban-goto)
     ("e" "expand card"      simply-kanban-toggle-expand :transient t)
     ("E" "expand all"       simply-kanban-toggle-expand-all :transient t)
@@ -2845,12 +2845,12 @@ Used to build the board buffer name."
     ("V" "show tasks"       simply-kanban-toggle-tasks :transient t)
     ("F" "follow mode"      simply-kanban-toggle-follow :transient t)]
    ["Board"
-    ("t" "filter by tag"    simply-kanban-set-tag-filter)
-    ("T" "clear tag filter" simply-kanban-clear-tag-filter :transient t)
-    ("S" "filter by sprint" simply-kanban-set-sprint-filter)
-    ("C" "clear sprint filter" simply-kanban-clear-sprint-filter :transient t)
-    ("a" "filter by priority" simply-kanban-set-priority-filter)
-    ("A" "clear priority filter" simply-kanban-clear-priority-filter :transient t)
+    ("t" "tag filter"       simply-kanban-set-tag-filter)
+    ("T" "clear tag"        simply-kanban-clear-tag-filter :transient t)
+    ("S" "sprint filter"    simply-kanban-set-sprint-filter)
+    ("C" "clear sprint"     simply-kanban-clear-sprint-filter :transient t)
+    ("a" "priority filter"  simply-kanban-set-priority-filter)
+    ("A" "clear priority"   simply-kanban-clear-priority-filter :transient t)
     ("B" "switch board"     simply-kanban-switch-board)
     ("g" "refresh"          simply-kanban-refresh :transient t)
     ("q" "quit board"       quit-window)]])
