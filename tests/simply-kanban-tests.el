@@ -144,14 +144,36 @@
       (should (eq 'story (plist-get (cl-first tasks) :type)))
       (should (eq 'task (plist-get (cl-second tasks) :type))))))
 
-(ert-deftest sk-test-ticket-parent-non-todo-story ()
-  "A non-TODO `TICKET_TYPE: STORY' heading still names its tasks' parent."
+(ert-deftest sk-test-non-todo-heading-not-shown ()
+  "A non-TODO heading is not a card and does not label a parent."
   (sk-test-with-org (concat "#+TODO: TODO | DONE\n\n"
                             "* Story\n"
                             ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
                             "** TODO Child\n")
-    (let ((task (car (simply-kanban--collect-tasks src))))
-      (should (string= "Story" (plist-get task :parent))))))
+    (let ((tasks (simply-kanban--collect-tasks src)))
+      (should (= 1 (length tasks)))
+      (should-not (plist-get (car tasks) :parent)))))
+
+(ert-deftest sk-test-stories-only-top-level ()
+  "Only the shallowest TODO heading can be a story."
+  (sk-test-with-org (concat "#+TODO: TODO | DONE\n\n"
+                            "* TODO Root\n"
+                            "** TODO Nested\n"
+                            ":PROPERTIES:\n:TICKET_TYPE: STORY\n:END:\n"
+                            "*** TODO Grandchild\n")
+    (let* ((tasks (simply-kanban--collect-tasks src))
+           (root (seq-find (lambda (tk) (string= "Root" (plist-get tk :title)))
+                           tasks))
+           (nested (seq-find (lambda (tk) (string= "Nested" (plist-get tk :title)))
+                             tasks))
+           (grandchild (seq-find (lambda (tk) (string= "Grandchild"
+                                                       (plist-get tk :title)))
+                                 tasks)))
+      (should (eq 'story (plist-get root :type)))
+      (should (eq 'task (plist-get nested :type)))
+      (should (eq 'task (plist-get grandchild :type)))
+      (should (= 2 (plist-get root :children)))
+      (should (= 1 (plist-get nested :children))))))
 
 (ert-deftest sk-test-format-card-ticket-relations ()
   "Tickets show their type, parent story, and child count."

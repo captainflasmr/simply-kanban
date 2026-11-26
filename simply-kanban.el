@@ -225,19 +225,20 @@ portion uses the `shadow' face."
 
 (defcustom simply-kanban-show-ticket-types t
   "When non-nil, show ticket types and hierarchy on each card.
-A TODO heading with TODO descendants is a STORY; leaf TODO headings are
-TASKs.  A childless heading with a `TICKET_TYPE' property of `STORY' is also
-a STORY.  Cards show their type, their parent when they have one, and a
-story's child count.  Set this to nil to omit the extra relationship line."
+A top-level TODO heading with TODO descendants is a STORY; nested TODO
+headings are TASKs.  A childless top-level heading with a `TICKET_TYPE'
+property of `STORY' is also a STORY.  Cards show their type, their parent
+when they have one, and a story's child count.  Set this to nil to omit the
+extra relationship line."
   :type 'boolean
   :group 'simply-kanban)
 
 (defcustom simply-kanban-show-stories nil
   "When non-nil, show STORY cards on kanban boards.
-A STORY is a TODO heading with TODO descendants, or a childless heading with
-a `TICKET_TYPE' property of `STORY'.  When nil, only TASK cards are shown,
-but task cards still name their parent story.  Toggle the current board with
-\\[simply-kanban-toggle-stories]."
+A STORY is a top-level TODO heading with TODO descendants, or a childless
+top-level heading with a `TICKET_TYPE' property of `STORY'.  When nil, only
+TASK cards are shown, but task cards still name their parent story.  Toggle
+the current board with \\[simply-kanban-toggle-stories]."
   :type 'boolean
   :group 'simply-kanban)
 
@@ -608,20 +609,22 @@ The value includes the currently running clock interval, if any."
 
 (defun simply-kanban--collect-tasks (buffer &optional restrict)
   "Collect TODO entries from Org BUFFER as a list of card plists.
-Each plist has :keyword :title :jira :body :logbook :priority :tags :effort
-:points :clocked :clocking :remaining :over :done :type :parent
-:parent-jira :children :children-done :child-tasks :sprint :file :board
-:marker.  :points is the heading's `STORY_POINTS' as a number.  :jira is the
-issue key parsed from the start of the title.  :clocked is the heading's
-clocked minutes (including a running clock), and :clocking is non-nil for the
-active clock when clock display is enabled.  :type is `story' or `task',
-:parent is the title of the nearest ancestor ticket heading, and :parent-jira
-is its parsed issue key.  :children and :children-done count the TODO
-descendants of a story, and :child-tasks lists them as plists with :keyword,
-:jira, :title, and :done.  :remaining is the estimate left after clocked
-time, :over is the clocked time beyond the estimate, and :done is non-nil for
-a done keyword.  :sprint is the heading's sprint as a string (nil when
-unset), from the inherited `SPRINT' property or, when
+Each plist has :keyword :title :jira :level :story-property :body :logbook
+:priority :tags :effort :points :clocked :clocking :remaining :over :done
+:type :parent :parent-jira :children :children-done :child-tasks :sprint :file
+:board :marker.  :points is the heading's `STORY_POINTS' as a number.  :jira
+is the issue key parsed from the start of the title.  :level is the heading
+level, and :story-property is non-nil when `TICKET_TYPE' is `STORY'.
+:clocked is the heading's clocked minutes (including a running clock), and
+:clocking is non-nil for the active clock when clock display is enabled.
+:type is `story' or `task': only a top-level ticket heading with children or
+a `STORY' property is a story.  :parent is the title of the nearest ancestor
+TODO heading, and :parent-jira is its parsed issue key.  :children and
+:children-done count the TODO descendants, and :child-tasks lists them as
+plists with :keyword, :jira, :title, and :done.  :remaining is the estimate
+left after clocked time, :over is the clocked time beyond the estimate, and
+:done is non-nil for a done keyword.  :sprint is the heading's sprint as a
+string (nil when unset), from the inherited `SPRINT' property or, when
 `simply-kanban-sprint-from-heading' is non-nil, the nearest ancestor
 heading.  :board is filled in only by `simply-kanban--collect-boards'.
 RESTRICT limits which entries become cards:
@@ -645,6 +648,10 @@ RESTRICT limits which entries become cards:
                            (title (substring-no-properties
                                    (or (org-get-heading t t t t) "")))
                            (jira (simply-kanban--jira-number title))
+                           (level (org-current-level))
+                           (story-property
+                            (let ((prop (org-entry-get nil "TICKET_TYPE")))
+                              (and prop (string= "story" (downcase prop)))))
                            (effort (org-entry-get nil "Effort"))
                            (points (and simply-kanban-show-story-points
                                         (simply-kanban--story-points)))
@@ -666,11 +673,12 @@ RESTRICT limits which entries become cards:
                             (seq-count (lambda (ct) (plist-get ct :done))
                                        child-tasks))
                            (parent (simply-kanban--ancestor-ticket-title))
-                           (parent-jira (simply-kanban--jira-number parent))
-                           (type (simply-kanban--ticket-type children)))
+                           (parent-jira (simply-kanban--jira-number parent)))
                       (push (list :keyword kw
                                   :title title
                                   :jira jira
+                                  :level level
+                                  :story-property story-property
                                   :body (simply-kanban--entry-body)
                                   :logbook (simply-kanban--entry-logbook)
                                   :priority (nth 3 comps)
@@ -682,7 +690,6 @@ RESTRICT limits which entries become cards:
                                   :remaining remaining
                                   :over over
                                   :done done
-                                  :type type
                                   :parent parent
                                   :parent-jira parent-jira
                                   :children children
@@ -698,7 +705,7 @@ RESTRICT limits which entries become cards:
                (goto-char restrict)
                (org-map-entries collect nil 'tree))
            (org-map-entries collect)))
-       (nreverse tasks)))))
+       (simply-kanban--assign-ticket-types (nreverse tasks))))))
 
 (defun simply-kanban--subtree-has-todo-p ()
   "Non-nil if the subtree of the heading at point holds any TODO entry."
@@ -735,28 +742,34 @@ Each entry is a plist with :keyword, :jira, :title, and :done."
       (nreverse tasks))))
 
 (defun simply-kanban--ancestor-ticket-title ()
-  "Return the title of the nearest ancestor ticket heading, or nil.
-A ticket heading is a TODO heading or a heading whose `TICKET_TYPE'
-property is `STORY'."
+  "Return the title of the nearest ancestor TODO heading, or nil.
+Only TODO headings are board items, so non-TODO ancestors are ignored."
   (save-excursion
     (catch 'found
       (while (org-up-heading-safe)
-        (let ((type (org-entry-get nil "TICKET_TYPE")))
-          (when (or (org-get-todo-state)
-                    (and type (string= "story" (downcase type))))
-            (throw 'found
-                   (substring-no-properties (or (org-get-heading t t t t) ""))))))
+        (when (org-get-todo-state)
+          (throw 'found
+                 (substring-no-properties (or (org-get-heading t t t t) "")))))
       nil)))
 
-(defun simply-kanban--ticket-type (children)
-  "Return `story' or `task' for the heading at point.
-A heading with CHILDREN TODO entries is a STORY.  A childless heading with a
-`TICKET_TYPE' property of `STORY' is also a STORY; everything else is a TASK."
-  (let ((prop (org-entry-get nil "TICKET_TYPE")))
-    (if (or (> (or children 0) 0)
-            (and prop (string= "story" (downcase prop))))
-        'story
-      'task)))
+(defun simply-kanban--assign-ticket-types (tasks)
+  "Set :type on TASKS, marking only top-level ticket headings as stories.
+The top-level ticket level is the shallowest TODO heading in TASKS.  A
+heading at that level is a STORY when it has TODO descendants or a
+`TICKET_TYPE' property of `STORY'; every other heading is a TASK."
+  (let ((top (and tasks
+                  (apply #'min
+                         (mapcar (lambda (tk) (plist-get tk :level))
+                                 tasks)))))
+    (mapcar (lambda (task)
+              (plist-put task
+                         :type
+                         (if (and (= (plist-get task :level) top)
+                                  (or (> (or (plist-get task :children) 0) 0)
+                                      (plist-get task :story-property)))
+                             'story
+                           'task)))
+            tasks)))
 
 (defun simply-kanban--scan-boards (buffer)
   "Return ((NAME . MARKER) ...) for the kanban boards defined in BUFFER.
