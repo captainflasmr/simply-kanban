@@ -47,13 +47,14 @@
 ;; the heading it creates one first, so it always tries to take you to a card.
 ;;
 ;;   n / p          next / previous card
+;;   j / k          move the card down / up within its column
 ;;   TAB / S-TAB    next / previous column   (also f / b)
 ;;   }              advance card to the next stage
 ;;   {              send card back a stage
 ;;   s              set status (choose any stage)
 ;;   RET            reveal the heading (focus stays on the board)
 ;;   C-u RET        jump to the heading in its Org file
-;;   k              delete the heading (with confirmation)
+;;   x              delete the heading (with confirmation)
 ;;   t              filter board by tag
 ;;   T              clear tag filter
 ;;   S              filter board by sprint (SPRINT property)
@@ -144,7 +145,9 @@ open at once."
   :group 'simply-kanban)
 
 (defcustom simply-kanban-sort-by-priority nil
-  "When non-nil, sort cards within each column by priority (A > B > C > none)."
+  "When non-nil, sort cards without a manual order by priority.
+Cards carrying a `KANBAN_ORDER' property sort by that value first.  Cards
+without it sort by priority (A > B > C > none), then by source position."
   :type 'boolean
   :group 'simply-kanban)
 
@@ -621,19 +624,28 @@ The value includes the currently running clock interval, if any."
       (round (org-clock-get-clocked-time))
     (or (get-text-property (point) :org-clock-minutes) 0)))
 
+(defconst simply-kanban--order-property "KANBAN_ORDER"
+  "Org property storing a card's manual order on the board.")
+
+(defun simply-kanban--parse-order (value)
+  "Return VALUE as a numeric board order, or nil."
+  (when (and value (string-match-p "\\`-?[0-9]+\\'" value))
+    (string-to-number value)))
+
 (defun simply-kanban--collect-tasks (buffer &optional restrict)
   "Collect TODO entries from Org BUFFER as a list of card plists.
-Each plist has :keyword :title :jira :level :story-property :body :logbook
-:priority :tags :effort :points :clocked :clocking :remaining :over :done
-:type :parent :parent-jira :children :children-done :child-tasks :sprint :file
-:board :marker.  :points is the heading's `STORY_POINTS' as a number.  :jira
-is the issue key parsed from the start of the title.  :level is the heading
-level, and :story-property is non-nil when `TICKET_TYPE' is `STORY'.
-:clocked is the heading's clocked minutes (including a running clock), and
-:clocking is non-nil for the active clock when clock display is enabled.
-:type is `story' or `task': only a top-level ticket heading with children or
-a `STORY' property is a story.  :parent is the title of the nearest ancestor
-TODO heading, and :parent-jira is its parsed issue key.  :children and
+Each plist has :keyword :title :jira :level :order :story-property :body
+:logbook :priority :tags :effort :points :clocked :clocking :remaining :over
+:done :type :parent :parent-jira :children :children-done :child-tasks :sprint
+:file :board :marker.  :points is the heading's `STORY_POINTS' as a number.
+:jira is the issue key parsed from the start of the title.  :level is the
+heading level, :order is its manual `KANBAN_ORDER' value when set, and
+:story-property is non-nil when `TICKET_TYPE' is `STORY'.  :clocked is the
+heading's clocked minutes (including a running clock), and :clocking is
+non-nil for the active clock when clock display is enabled.  :type is `story'
+or `task': only a top-level ticket heading with children or a `STORY'
+property is a story.  :parent is the title of the nearest ancestor TODO
+heading, and :parent-jira is its parsed issue key.  :children and
 :children-done count the TODO descendants, and :child-tasks lists them as
 plists with :keyword, :jira, :title, and :done.  :remaining is the estimate
 left after clocked time, :over is the clocked time beyond the estimate, and
@@ -663,6 +675,9 @@ RESTRICT limits which entries become cards:
                                    (or (org-get-heading t t t t) "")))
                            (jira (simply-kanban--jira-number title))
                            (level (org-current-level))
+                           (order (simply-kanban--parse-order
+                                   (org-entry-get nil
+                                                  simply-kanban--order-property)))
                            (story-property
                             (let ((prop (org-entry-get nil "TICKET_TYPE")))
                               (and prop (string= "story" (downcase prop)))))
@@ -692,6 +707,7 @@ RESTRICT limits which entries become cards:
                                   :title title
                                   :jira jira
                                   :level level
+                                  :order order
                                   :story-property story-property
                                   :body (simply-kanban--entry-body)
                                   :logbook (simply-kanban--entry-logbook)
@@ -1402,18 +1418,58 @@ Lower numbers sort first: A=0, B=1, C=2, nil=3."
     (?C 2)
     (_ 3)))
 
+(defun simply-kanban--marker-order (marker)
+  "Return the manual board order stored on the heading at MARKER, or nil."
+  (when (and marker (marker-buffer marker))
+    (with-current-buffer (marker-buffer marker)
+      (org-with-wide-buffer
+       (goto-char marker)
+       (simply-kanban--parse-order
+        (org-entry-get nil simply-kanban--order-property))))))
+
+(defun simply-kanban--set-marker-order (marker order)
+  "Store ORDER as the manual board order on the heading at MARKER."
+  (with-current-buffer (marker-buffer marker)
+    (org-with-wide-buffer
+     (goto-char marker)
+     (org-back-to-heading t)
+     (org-set-property simply-kanban--order-property
+                       (number-to-string order)))))
+
+(defun simply-kanban--task-source-lessp (a b)
+  "Return non-nil when card A precedes card B in its Org source."
+  (let ((am (plist-get a :marker))
+        (bm (plist-get b :marker)))
+    (cond
+     ((or (null am) (not (markerp am)) (null (marker-buffer am))) nil)
+     ((or (null bm) (not (markerp bm)) (null (marker-buffer bm))) t)
+     ((/= (marker-position am) (marker-position bm))
+      (< (marker-position am) (marker-position bm)))
+     (t (string< (buffer-name (marker-buffer am))
+                 (buffer-name (marker-buffer bm)))))))
+
+(defun simply-kanban--task-lessp (a b)
+  "Return non-nil when card A sorts before card B within its column.
+Manual board order wins; cards without it keep priority or source order."
+  (let ((ao (or (plist-get a :order) most-positive-fixnum))
+        (bo (or (plist-get b :order) most-positive-fixnum)))
+    (cond
+     ((/= ao bo) (< ao bo))
+     (simply-kanban-sort-by-priority
+      (let ((ap (simply-kanban--priority-order (plist-get a :priority)))
+            (bp (simply-kanban--priority-order (plist-get b :priority))))
+        (if (/= ap bp)
+            (< ap bp)
+          (simply-kanban--task-source-lessp a b))))
+     (t (simply-kanban--task-source-lessp a b)))))
+
 (defun simply-kanban--column-cells (keyword tasks width)
   "Return the propertized line-strings for the KEYWORD column.
 TASKS is the full task list; only those matching KEYWORD are shown.
 Each returned string is exactly WIDTH columns wide."
   (let* ((col-tasks (seq-filter (lambda (tk) (equal (plist-get tk :keyword) keyword))
                                 tasks))
-         (col-tasks (if simply-kanban-sort-by-priority
-                        (sort col-tasks
-                              (lambda (a b)
-                                (< (simply-kanban--priority-order (plist-get a :priority))
-                                   (simply-kanban--priority-order (plist-get b :priority)))))
-                      col-tasks))
+         (col-tasks (sort col-tasks #'simply-kanban--task-lessp))
          (header-face (simply-kanban--keyword-face keyword))
          (points-total (and simply-kanban-show-story-points
                             (simply-kanban--column-points col-tasks)))
@@ -1749,6 +1805,79 @@ KEYWORD must be valid in the heading's own Org file."
 Must be called with the board buffer current."
   (seq-find (lambda (a) (simply-kanban--same-card-p (cdr a) marker))
             (simply-kanban--anchors)))
+
+(defun simply-kanban--current-column-anchors ()
+  "Return the anchors in the current card's column, top to bottom."
+  (let ((keyword (simply-kanban--column-at-point)))
+    (when keyword
+      (seq-filter
+       (lambda (anchor)
+         (equal (get-text-property (car anchor) 'simply-kanban-keyword)
+                keyword))
+       (simply-kanban--anchors)))))
+
+(defun simply-kanban--next-order-base ()
+  "Return the next unused manual board-order value."
+  (let ((max 0))
+    (dolist (anchor (simply-kanban--anchors) (+ max 10))
+      (let ((order (simply-kanban--marker-order (cdr anchor))))
+        (when (and order (> order max))
+          (setq max order))))))
+
+(defun simply-kanban--move-card (delta)
+  "Move the card at point DELTA positions within its column."
+  (let* ((marker (simply-kanban--marker-at-point))
+         (anchors (simply-kanban--current-column-anchors))
+         (index (cl-position-if
+                 (lambda (anchor)
+                   (simply-kanban--same-card-p (cdr anchor) marker))
+                 anchors))
+         (target (and index (+ index delta))))
+    (cond
+     ((null marker) (message "Point is not on a card"))
+     ((null index) (message "Card is not in a column"))
+     ((< target 0) (message "Already at the top"))
+     ((>= target (length anchors)) (message "Already at the bottom"))
+     (t
+      (let ((orders (mapcar (lambda (a)
+                              (simply-kanban--marker-order (cdr a)))
+                            anchors)))
+        (unless (and (seq-every-p #'numberp orders)
+                     (= (length orders)
+                        (length (delete-dups (copy-sequence orders)))))
+          (let ((base (simply-kanban--next-order-base))
+                (n 0))
+            (dolist (anchor anchors)
+              (setq n (1+ n))
+              (simply-kanban--set-marker-order (cdr anchor)
+                                               (+ base (* 10 n))))
+            (setq orders
+                  (mapcar (lambda (a)
+                            (simply-kanban--marker-order (cdr a)))
+                          anchors))))
+        (let ((current-order (nth index orders))
+              (target-order (nth target orders)))
+          (simply-kanban--set-marker-order (cdr (nth index anchors))
+                                           target-order)
+          (simply-kanban--set-marker-order (cdr (nth target anchors))
+                                           current-order)
+          (dolist (buf (delete-dups
+                        (mapcar (lambda (a) (marker-buffer (cdr a)))
+                                anchors)))
+            (simply-kanban--maybe-save buf))
+          (simply-kanban-refresh)
+          (simply-kanban--goto-marker marker)
+          (message "Card moved %s" (if (< delta 0) "up" "down"))))))))
+
+(defun simply-kanban-move-card-up ()
+  "Move the card at point up within its column."
+  (interactive)
+  (simply-kanban--move-card -1))
+
+(defun simply-kanban-move-card-down ()
+  "Move the card at point down within its column."
+  (interactive)
+  (simply-kanban--move-card 1))
 
 (defun simply-kanban--move (delta)
   "Move the card at point DELTA stages along its file's workflow.
@@ -2453,6 +2582,8 @@ highlight first."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "n") #'simply-kanban-next-card)
     (define-key map (kbd "p") #'simply-kanban-prev-card)
+    (define-key map (kbd "j") #'simply-kanban-move-card-down)
+    (define-key map (kbd "k") #'simply-kanban-move-card-up)
     (define-key map (kbd "f") #'simply-kanban-next-column)
     (define-key map (kbd "b") #'simply-kanban-prev-column)
     (define-key map (kbd "TAB") #'simply-kanban-next-column)
@@ -2462,7 +2593,7 @@ highlight first."
     (define-key map (kbd "}") #'simply-kanban-advance)
     (define-key map (kbd "{") #'simply-kanban-retreat)
     (define-key map (kbd "s") #'simply-kanban-set-status)
-    (define-key map (kbd "k") #'simply-kanban-delete)
+    (define-key map (kbd "x") #'simply-kanban-delete)
     (define-key map (kbd "t") #'simply-kanban-set-tag-filter)
     (define-key map (kbd "T") #'simply-kanban-clear-tag-filter)
     (define-key map (kbd "S") #'simply-kanban-set-sprint-filter)
@@ -2615,6 +2746,8 @@ Used to build the board buffer name."
   "Transient menu for `simply-kanban'."
   [:description simply-kanban--transient-description
    ["Move / Edit"
+    ("k" "move card up"     simply-kanban-move-card-up)
+    ("j" "move card down"   simply-kanban-move-card-down)
     ("}" "advance stage"   simply-kanban-advance :transient t)
     ("{" "retreat stage"   simply-kanban-retreat :transient t)
     ("s" "set status"      simply-kanban-set-status)
@@ -2624,7 +2757,7 @@ Used to build the board buffer name."
     ("P" "story points"    simply-kanban-set-story-points)
     ("N" "add note"        simply-kanban-add-note)
     ("#" "set card sprint" simply-kanban-set-sprint)
-    ("k" "delete card"     simply-kanban-delete)]
+    ("x" "delete card"     simply-kanban-delete)]
    ["Clock"
     ("i" "clock in"        simply-kanban-clock-in)
     ("o" "clock out"       simply-kanban-clock-out)]

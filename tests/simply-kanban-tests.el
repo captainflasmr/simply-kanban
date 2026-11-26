@@ -843,6 +843,15 @@ BODY runs with `board' current."
              ,@body)
          (kill-buffer board)))))
 
+(defun sk-test--card-titles ()
+  "Return the titles of the board's cards in buffer order."
+  (mapcar (lambda (anchor)
+            (let ((marker (cdr anchor)))
+              (with-current-buffer (marker-buffer marker)
+                (goto-char marker)
+                (org-get-heading t t t t))))
+          (simply-kanban--anchors)))
+
 (ert-deftest sk-test-anchors-count ()
   "The board has one card anchor per task."
   (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO a\n* TODO b\n* DONE c\n"
@@ -1176,13 +1185,15 @@ BODY runs with `board' current."
   (should (eq (lookup-key simply-kanban-mode-map "}") 'simply-kanban-advance))
   (should (eq (lookup-key simply-kanban-mode-map "{") 'simply-kanban-retreat))
   (should (eq (lookup-key simply-kanban-mode-map "s") 'simply-kanban-set-status))
-  (should (eq (lookup-key simply-kanban-mode-map "k") 'simply-kanban-delete))
+  (should (eq (lookup-key simply-kanban-mode-map "x") 'simply-kanban-delete))
   (should (eq (lookup-key simply-kanban-mode-map "t") 'simply-kanban-set-tag-filter))
   (should (eq (lookup-key simply-kanban-mode-map "T") 'simply-kanban-clear-tag-filter))
   (should (eq (lookup-key simply-kanban-mode-map "F") 'simply-kanban-toggle-follow))
   (should (eq (lookup-key simply-kanban-mode-map "c") 'simply-kanban-toggle-compact))
   (should (eq (lookup-key simply-kanban-mode-map "v") 'simply-kanban-toggle-stories))
   (should (eq (lookup-key simply-kanban-mode-map "V") 'simply-kanban-toggle-tasks))
+  (should (eq (lookup-key simply-kanban-mode-map "j") 'simply-kanban-move-card-down))
+  (should (eq (lookup-key simply-kanban-mode-map "k") 'simply-kanban-move-card-up))
   (should (eq (lookup-key simply-kanban-mode-map ";") 'simply-kanban-set-effort))
   (should (eq (lookup-key simply-kanban-mode-map "P") 'simply-kanban-set-story-points))
   (should (eq (lookup-key simply-kanban-mode-map "#") 'simply-kanban-set-sprint))
@@ -1560,6 +1571,48 @@ BODY runs with `board' current."
         (with-current-buffer (marker-buffer first-marker)
           (goto-char first-marker)
           (should (string-match-p "High" (org-get-heading t t t t))))))))
+
+(ert-deftest sk-test-manual-card-order ()
+  "Cards with `KANBAN_ORDER' sort by that value before unordered cards."
+  (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                              "* TODO Alpha\n"
+                              ":PROPERTIES:\n:KANBAN_ORDER: 30\n:END:\n"
+                              "* TODO Beta\n"
+                              ":PROPERTIES:\n:KANBAN_ORDER: 10\n:END:\n"
+                              "* TODO Gamma\n")
+    (should (equal '("Beta" "Alpha" "Gamma") (sk-test--card-titles)))))
+
+(ert-deftest sk-test-manual-order-beats-priority ()
+  "Manual card order wins over priority sorting."
+  (let ((simply-kanban-sort-by-priority t))
+    (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                                "* TODO [#C] Alpha\n"
+                                ":PROPERTIES:\n:KANBAN_ORDER: 10\n:END:\n"
+                                "* TODO [#A] Beta\n"
+                                ":PROPERTIES:\n:KANBAN_ORDER: 20\n:END:\n")
+      (should (equal '("Alpha" "Beta") (sk-test--card-titles))))))
+
+(ert-deftest sk-test-move-card-order ()
+  "Moving a card up or down writes `KANBAN_ORDER' and reorders the board."
+  (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                              "* TODO Alpha\n"
+                              "* TODO Beta\n"
+                              "* TODO Gamma\n")
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (simply-kanban-next-card)
+    (simply-kanban-move-card-up)
+    (should (equal '("Beta" "Alpha" "Gamma") (sk-test--card-titles)))
+    (with-current-buffer src
+      (goto-char (point-min))
+      (re-search-forward "^\\* TODO Alpha" nil t)
+      (let ((alpha (string-to-number (org-entry-get nil "KANBAN_ORDER"))))
+        (goto-char (point-min))
+        (re-search-forward "^\\* TODO Beta" nil t)
+        (should (< (string-to-number (org-entry-get nil "KANBAN_ORDER"))
+                   alpha))))
+    (simply-kanban-move-card-down)
+    (should (equal '("Alpha" "Beta" "Gamma") (sk-test--card-titles)))))
 
 (ert-deftest sk-test-show-card-finds-anchor ()
   "A heading's markers match its own card anchor on the board."

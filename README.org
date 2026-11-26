@@ -50,12 +50,13 @@ The board buffer's name identifies its source, the active sprint filter appears 
 | Key       | Action                                               |
 |-----------+------------------------------------------------------|
 | =n= / =p= | move down / up the cards in a column                 |
+| =j= / =k= | move the current card down / up in its column    |
 | =f= / =b= | move across columns (also =TAB= / =S-TAB=), wrapping |
 | =}= / ={= | advance / retreat card a stage                       |
 | =s=       | set status (choose any stage)                        |
 | =RET=     | reveal the heading (focus stays on the board)        |
 | =C-u RET= / =C-u C-m= | jump to the heading in the Org file     |
-| =k=       | delete the heading (with confirmation)               |
+| =x=       | delete the heading (with confirmation)               |
 | =t=       | filter board by tag                                  |
 | =T=       | clear tag filter                                     |
 | =S=       | filter board by sprint (=SPRINT= property)           |
@@ -182,6 +183,12 @@ By default cards use a compact layout: the title is followed by one metadata lin
 
 - =simply-kanban-compact-cards= (default =t=) — start boards in the compact single-line metadata layout; set it to =nil= to start in the detailed layout.
 
+* Manual card order
+
+Cards carrying a =KANBAN_ORDER= property are sorted by that numeric value within their column.  Cards without the property follow the ordered cards and keep their Org source order; when =simply-kanban-sort-by-priority= is non-nil, those unordered cards are sorted by priority instead.  Manual order always wins for cards that have it.
+
+Press =k= or =j= to move the card at point up or down within its column.  The first move in a column writes =KANBAN_ORDER= to every card in that column while preserving the current visible order, then swaps the affected values; later moves just swap.  Moving a card between columns still uses =}= / ={= or =s=, and does not change its manual order.
+
 * Stories and tasks
 
 Ticket types are inferred from the Org hierarchy.  A top-level TODO heading with TODO descendants is a =STORY=; nested TODO headings are =TASK=s.  A childless top-level heading can also be marked as a story by giving it a =TICKET_TYPE= property of =STORY=.  Only TODO headings are board items: a heading without a TODO keyword is never shown as a card or used as a parent label.  Ticket headings should start with a Jira number such as =MM-1472=; the board parses that key for the card and uses the parent's key in compact hierarchy labels.
@@ -221,7 +228,7 @@ Each card with progress data also carries its own bar, drawn with the same fille
 - =simply-kanban-compact-cards= (default =t=) — condense each card's metadata onto a single line (see [[*Card layout]]); set it to =nil= to start new boards in the detailed layout, or press =c= to toggle a board.
 - =simply-kanban-buffer-name= — base name for board buffers; each board appends its source and board name, so multiple boards get distinct buffers.
 - =simply-kanban-auto-refresh= (default =t=) — refresh the board automatically whenever its source Org buffer is saved.
-- =simply-kanban-sort-by-priority= (default =nil=) — when non-nil, sort cards within each column by priority (A > B > C > none).
+- =simply-kanban-sort-by-priority= (default =nil=) — when non-nil, sort cards without a manual =KANBAN_ORDER= by priority (A > B > C > none); manual order wins.
 - =simply-kanban-show-effort= (default =t=) — show each card's Org =Effort= estimate (=Effort: 2:00=) in the detailed layout and sum each column's efforts in brackets (=[2:00]=) in its header; compact cards omit the value.
 - =simply-kanban-show-story-points= (default =t=) — show each card's =STORY_POINTS= as =Points: 5= in the detailed layout and sum each column's points in parentheses (=(8 pts)=) in its header; compact cards omit the value.
 - =simply-kanban-show-clock= (default =t=) — show each card's clocked time (=Clocked: 1:30=) in the detailed layout and mark a running clock with =(run)=; compact cards omit the clocked value.
