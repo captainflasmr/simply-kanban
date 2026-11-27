@@ -69,6 +69,7 @@ The board buffer's name identifies its source; the active sprint filter appears 
 | =P=       | set the story points on the card at point            |
 | =i=       | clock in the card at point                           |
 | =o=       | clock out the running clock                          |
+| =I=       | log a duration such as =1d= without running a clock  |
 | =#=       | set the sprint (=SPRINT= property) on the card        |
 | =e= / =E= | toggle the body of the card / every card             |
 | =N=       | add a timestamped note to the card at point           |
@@ -165,7 +166,7 @@ Each row reports the sprint, task count, done count, story points, effort-weight
 
 * Clocking
 
-The board reads the source headings' Org clock entries, so time clocked anywhere in Org is visible on the cards.  Press =i= to clock in the card at point and =o= to clock out whichever task is running.  The active clock is shown in the header line, a solid block outline is drawn around the entire card in the ticket's colour, and the detailed layout displays =Clocked: 1:30 (run)=.  Cards with an effort estimate show the time left, =Remaining: 1d 3h 42m=, calculated from the Effort estimate minus clocked time; this appears even before any time is clocked.  A =DONE= card has zero remaining, and a card whose clocked time exceeds its estimate shows =Over: 30m= instead.  The day length in that format follows =org-duration-units= from the source Org buffer, so the project's 37-hour week renders one day as =7h24m= even when the board buffer itself is not visiting that file.
+The board reads the source headings' Org clock entries, so time clocked anywhere in Org is visible on the cards.  Press =i= to clock in the card at point and =o= to clock out whichever task is running.  To log work retrospectively, press =I= (=simply-kanban-log-time=) and enter an Org duration such as =1d=, =8h=, or =1:30=; this writes a dated =CLOCK: [start]--[end] => H:MM= entry to the card's =LOGBOOK= drawer, ending now and starting the given duration earlier.  Use =C-u I= to choose the date the entry ends on.  The duration follows the source buffer's =org-duration-units= (so =1d= means 7h24m in a 37-hour-week project), and Org clock tables and =org-clock-sum= count the entry normally.  The active clock is shown in the header line, a solid block outline is drawn around the entire card in the ticket's colour, and the detailed layout displays =Clocked: 1:30 (run)=.  Cards with an effort estimate show the time left, =Remaining: 1d 3h 42m=, calculated from the Effort estimate minus clocked time; this appears even before any time is clocked.  A =DONE= card has zero remaining, and a card whose clocked time exceeds its estimate shows =Over: 30m= instead.  The day length in that format follows =org-duration-units= from the source Org buffer, so the project's 37-hour week renders one day as =7h24m= even when the board buffer itself is not visiting that file.
 
 - =simply-kanban-show-clock= (default =t=) — show each card's clocked time and the active clock marker in the detailed layout; compact cards omit clocked time.
 - =simply-kanban-show-clock-total= (default =nil=) — append each column's summed clocked time in braces (={1:30}=) after its effort total.

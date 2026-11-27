@@ -67,6 +67,7 @@
 ;;   P              set the story points on the card at point
 ;;   #              set the sprint (SPRINT property) on the card at point
 ;;   i / o          clock in the card at point / clock out
+;;   I              log a duration on the card without running a clock
 ;;   e              toggle the body of the card at point
 ;;   E              toggle the body of every card
 ;;   N              add a timestamped note to the card at point
@@ -2047,6 +2048,46 @@ Empty input removes the property."
       (simply-kanban-refresh)
       (message "Clocked out"))))
 
+(defun simply-kanban-log-time (duration &optional end-time)
+  "Log DURATION as clock time ending at END-TIME on the card at point.
+DURATION is any Org duration string, such as \"1d\", \"8h\", or \"1:30\",
+interpreted with the source buffer's `org-duration-units'.  The time is
+written as a dated `CLOCK: [start]--[end] => H:MM' entry in the card's
+LOGBOOK drawer, starting DURATION before END-TIME (default: now).  Use this
+for retrospective logging instead of running a live clock.  With a prefix
+argument, interactively choose the date the entry ends on."
+  (interactive
+   (list (read-string "Time to log (e.g. 1d, 8h, 1:30): ")
+         (if current-prefix-arg
+             (org-read-date t t nil "Date logged: " (current-time))
+           (current-time))))
+  (let ((marker (simply-kanban--marker-at-point)))
+    (unless (and marker (buffer-live-p (marker-buffer marker)))
+      (user-error "Point is not on a card"))
+    (let* ((input (string-trim duration))
+           (minutes (simply-kanban--effort-minutes input))
+           (total (and minutes (round minutes))))
+      (unless (and total (> total 0))
+        (user-error "Invalid duration: %s" duration))
+      (let* ((end (or end-time (current-time)))
+             (start (time-subtract end (* 60 total)))
+             (stamp-format (org-time-stamp-format t t))
+             (start-stamp (format-time-string stamp-format start))
+             (end-stamp (format-time-string stamp-format end)))
+        (with-current-buffer (marker-buffer marker)
+          (org-with-wide-buffer
+           (goto-char marker)
+           (org-back-to-heading t)
+           (org-clock-find-position nil)
+           (insert (format "CLOCK: %s--%s =>  %d:%02d\n"
+                           start-stamp end-stamp
+                           (/ total 60) (% total 60)))))
+        (simply-kanban--maybe-save (marker-buffer marker))
+        (simply-kanban-refresh)
+        (simply-kanban--goto-marker marker)
+        (message "Logged %s (%d:%02d) ending %s"
+                 input (/ total 60) (% total 60) end-stamp)))))
+
 (defun simply-kanban-toggle-clock ()
   "Clock in the card at point, or clock it out if it is already running."
   (interactive)
@@ -2681,6 +2722,7 @@ highlight first."
     (define-key map (kbd "#") #'simply-kanban-set-sprint)
     (define-key map (kbd "i") #'simply-kanban-clock-in)
     (define-key map (kbd "o") #'simply-kanban-clock-out)
+    (define-key map (kbd "I") #'simply-kanban-log-time)
     (define-key map (kbd "F") #'simply-kanban-toggle-follow)
     (define-key map (kbd "e") #'simply-kanban-toggle-expand)
     (define-key map (kbd "E") #'simply-kanban-toggle-expand-all)
@@ -2838,7 +2880,8 @@ Used to build the board buffer name."
     ("#" "set sprint"       simply-kanban-set-sprint)
     ("N" "add note"         simply-kanban-add-note)
     ("i" "clock in"         simply-kanban-clock-in)
-    ("o" "clock out"        simply-kanban-clock-out)]
+    ("o" "clock out"        simply-kanban-clock-out)
+    ("I" "log time"         simply-kanban-log-time)]
    ["View"
     ("RET" "reveal heading" simply-kanban-goto)
     ("e" "expand card"      simply-kanban-toggle-expand :transient t)

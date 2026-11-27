@@ -1207,6 +1207,7 @@ BODY runs with `board' current."
   (should (eq (lookup-key simply-kanban-mode-map "#") 'simply-kanban-set-sprint))
   (should (eq (lookup-key simply-kanban-mode-map "i") 'simply-kanban-clock-in))
   (should (eq (lookup-key simply-kanban-mode-map "o") 'simply-kanban-clock-out))
+  (should (eq (lookup-key simply-kanban-mode-map "I") 'simply-kanban-log-time))
   (should (eq (lookup-key simply-kanban-mode-map "S") 'simply-kanban-set-sprint-filter))
   (should (eq (lookup-key simply-kanban-mode-map "C") 'simply-kanban-clear-sprint-filter))
   (should (eq (lookup-key simply-kanban-mode-map "a") 'simply-kanban-set-priority-filter))
@@ -1347,6 +1348,31 @@ BODY runs with `board' current."
             (should (re-search-forward "CLOCK:" nil t))))
       (when (org-clock-is-active)
         (org-clock-out)))))
+
+(ert-deftest sk-test-log-time ()
+  "Logging a duration writes a dated CLOCK entry."
+  (let ((org-duration-units '(("min" . 1) ("h" . 60) ("d" . 444))))
+    (sk-test-with-board (concat "#+TODO: TODO | DONE\n\n"
+                                "* TODO Alpha\n"
+                                ":PROPERTIES:\n:Effort: 2d\n:END:\n")
+      (goto-char (point-min))
+      (simply-kanban-next-card)
+      (simply-kanban-log-time
+       "1d" (encode-time 0 0 17 26 11 2026))
+      (with-current-buffer src
+        (goto-char (point-min))
+        (should (re-search-forward
+                 (concat "CLOCK: \\[2026-11-26 Thu 09:36\\]"
+                         "--\\[2026-11-26 Thu 17:00\\] =>  7:24")
+                 nil t)))
+      (should (string-match-p "1d" (buffer-string))))))
+
+(ert-deftest sk-test-log-time-rejects-invalid-duration ()
+  "Logging invalid duration text leaves the card unchanged."
+  (sk-test-with-board "#+TODO: TODO | DONE\n\n* TODO Alpha\n"
+    (goto-char (point-min))
+    (simply-kanban-next-card)
+    (should-error (simply-kanban-log-time "not-a-duration") :type 'user-error)))
 
 (ert-deftest sk-test-highlight-running-card ()
   "The running card gets a solid block outline."
